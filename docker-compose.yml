@@ -1,0 +1,53 @@
+services:
+  coda-core:
+    build: .
+    container_name: coda-core
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./config:/app/config:ro
+      - coda-data:/app/data
+    networks:
+      - coda-internal
+    depends_on:
+      - redis
+      - postgres
+    ports:
+      - "3000:3000"
+
+  redis:
+    image: redis:7-alpine
+    container_name: coda-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - coda-internal
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: coda-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: coda
+      POSTGRES_USER: coda
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks:
+      - coda-internal
+    secrets:
+      - pg_password
+
+volumes:
+  coda-data:
+  redis-data:
+  pg-data:
+
+networks:
+  coda-internal:
+    driver: bridge
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt

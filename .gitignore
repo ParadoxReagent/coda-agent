@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+coverage/
+.DS_Store
+secrets/
+config/config.yaml
+custom-skills/*/
+!custom-skills/.gitkeep

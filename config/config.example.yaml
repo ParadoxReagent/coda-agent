@@ -1,0 +1,88 @@
+llm:
+  default_provider: "anthropic"
+  default_model: "claude-sonnet-4-5-20250514"
+
+  providers:
+    anthropic:
+      type: "anthropic"
+      api_key: "sk-ant-..."
+      models:
+        - "claude-sonnet-4-5-20250514"
+        - "claude-haiku-3-5-20241022"
+
+    google:
+      type: "google"
+      api_key: "AIza..."
+      models:
+        - "gemini-2.0-flash"
+        - "gemini-2.0-pro"
+      capabilities:
+        parallel_tool_calls: false
+
+    openai:
+      type: "openai_compat"
+      base_url: "https://api.openai.com/v1"
+      api_key: "sk-..."
+      models:
+        - "gpt-4o"
+        - "gpt-4o-mini"
+
+    openrouter:
+      type: "openai_compat"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "sk-or-..."
+      default_headers:
+        HTTP-Referer: "https://coda-agent.local"
+        X-Title: "coda"
+      models:
+        - "anthropic/claude-sonnet-4-5"
+        - "google/gemini-2.0-flash"
+
+    ollama:
+      type: "openai_compat"
+      base_url: "http://localhost:11434/v1"
+      api_key: "ollama"
+      models:
+        - "llama3.1:8b"
+        - "mistral:7b"
+      capabilities:
+        tools: "model_dependent"
+        usage_metrics: false
+        json_mode: false
+
+  cost_per_million_tokens:
+    "claude-sonnet-4-5-20250514":
+      input: 3.0
+      output: 15.0
+    "gpt-4o":
+      input: 2.5
+      output: 10.0
+    "gemini-2.0-flash":
+      input: 0.1
+      output: 0.4
+
+  daily_spend_alert_threshold: 10.0
+
+discord:
+  bot_token: ""
+  channel_id: ""
+  allowed_user_ids: []
+
+redis:
+  url: "redis://localhost:6379"
+
+database:
+  url: "postgresql://coda:coda@localhost:5432/coda"
+
+server:
+  port: 3000
+  host: "0.0.0.0"
+
+skills:
+  external_dirs: []
+  external_policy:
+    mode: "strict"
+    trusted_signing_keys: []
+    allow_unsigned_local: false
+    allowed_local_unsigned_dirs:
+      - "./custom-skills"

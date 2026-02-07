@@ -1,0 +1,144 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { SkillRegistry } from "../../../src/skills/registry.js";
+import { createMockSkill, createMockLogger, createMockSkillContext } from "../../helpers/mocks.js";
+
+describe("SkillRegistry", () => {
+  let registry: SkillRegistry;
+  let logger: ReturnType<typeof createMockLogger>;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    registry = new SkillRegistry(logger);
+  });
+
+  it("registers a skill and includes its tools in getToolDefinitions", () => {
+    const skill = createMockSkill({
+      name: "email",
+      tools: [
+        {
+          name: "email_check",
+          description: "Check emails",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+    });
+
+    registry.register(skill);
+
+    const tools = registry.getToolDefinitions();
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.name).toBe("email_check");
+  });
+
+  it("routeToolCall returns the correct skill for a given tool name", () => {
+    const skill = createMockSkill({ name: "plex" });
+    registry.register(skill);
+
+    const found = registry.getSkillForTool("plex_action");
+    expect(found).toBeDefined();
+    expect(found!.name).toBe("plex");
+  });
+
+  it("getSkillForTool returns undefined for unknown tool names", () => {
+    const found = registry.getSkillForTool("nonexistent_tool");
+    expect(found).toBeUndefined();
+  });
+
+  it("executeToolCall throws for unknown tool names", async () => {
+    await expect(
+      registry.executeToolCall("nonexistent_tool", {})
+    ).rejects.toThrow("Unknown tool");
+  });
+
+  it("rejects skills with missing required config", () => {
+    const skill = createMockSkill({
+      name: "secured",
+      requiredConfig: ["api_key", "secret"],
+    });
+
+    expect(() => registry.register(skill, {})).toThrow("missing required config");
+  });
+
+  it("accepts skills when all required config is present", () => {
+    const skill = createMockSkill({
+      name: "secured",
+      requiredConfig: ["api_key"],
+    });
+
+    expect(() =>
+      registry.register(skill, { api_key: "test" })
+    ).not.toThrow();
+  });
+
+  it("calls startup with SkillContext on all skills during startupAll", async () => {
+    const skill1 = createMockSkill({ name: "skill1" });
+    const skill2 = createMockSkill({ name: "skill2" });
+
+    registry.register(skill1);
+    registry.register(skill2);
+
+    await registry.startupAll((name) => createMockSkillContext(name));
+
+    expect(skill1.startup).toHaveBeenCalledOnce();
+    expect(skill2.startup).toHaveBeenCalledOnce();
+  });
+
+  it("calls shutdown on all skills during shutdownAll", async () => {
+    const skill = createMockSkill({ name: "test" });
+    registry.register(skill);
+
+    await registry.shutdownAll();
+
+    expect(skill.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("skill crash during startup logs error but does not prevent others", async () => {
+    const badSkill = createMockSkill({ name: "bad" });
+    (badSkill.startup as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("Startup crash")
+    );
+    const goodSkill = createMockSkill({ name: "good" });
+
+    registry.register(badSkill);
+    registry.register(goodSkill);
+
+    await registry.startupAll((name) => createMockSkillContext(name));
+
+    expect(logger.error).toHaveBeenCalled();
+    expect(goodSkill.startup).toHaveBeenCalledOnce();
+  });
+
+  it("tools with requiresConfirmation are flagged correctly", () => {
+    const skill = createMockSkill({
+      name: "dangerous",
+      tools: [
+        {
+          name: "danger_action",
+          description: "Destructive",
+          input_schema: { type: "object", properties: {} },
+          requiresConfirmation: true,
+        },
+        {
+          name: "safe_action",
+          description: "Safe",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+    });
+
+    registry.register(skill);
+
+    expect(registry.toolRequiresConfirmation("danger_action")).toBe(true);
+    expect(registry.toolRequiresConfirmation("safe_action")).toBe(false);
+  });
+
+  it("listSkills returns all registered skills", () => {
+    registry.register(createMockSkill({ name: "email", description: "Email skill" }));
+    registry.register(createMockSkill({ name: "plex", description: "Plex skill" }));
+
+    const list = registry.listSkills();
+    expect(list).toHaveLength(2);
+    expect(list.map((s) => s.name)).toContain("email");
+    expect(list.map((s) => s.name)).toContain("plex");
+  });
+});

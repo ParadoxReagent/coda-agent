@@ -1,0 +1,12 @@
+{
+  "name": "test-skill",
+  "version": "1.0.0",
+  "description": "A test skill for integration testing",
+  "entry": "./index.js",
+  "requires": {
+    "config": [],
+    "services": ["redis"]
+  },
+  "runsInWorker": false,
+  "coda_sdk_version": "*"
+}

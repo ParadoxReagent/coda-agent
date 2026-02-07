@@ -1,0 +1,50 @@
+{
+  "name": "coda-agent",
+  "version": "1.0.0",
+  "description": "Personal AI assistant platform with composable skills",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:phase1": "vitest run --reporter=verbose",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@google/genai": "^1.0.0",
+    "openai": "^4.80.0",
+    "discord.js": "^14.16.0",
+    "drizzle-orm": "^0.36.0",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.0",
+    "js-yaml": "^4.1.0",
+    "pino": "^9.6.0",
+    "postgres": "^3.4.0",
+    "semver": "^7.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/semver": "^7.5.0",
+    "drizzle-kit": "^0.30.0",
+    "ioredis-mock": "^8.9.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
