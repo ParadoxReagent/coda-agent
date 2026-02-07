@@ -45,31 +45,14 @@
   - Output: confirmation
 
 ### Proactive Email Alerts
-- [ ] Publish `alert.email.urgent` event when urgent emails arrive during polling
+- [ ] Publish `alert.email.urgent` event via `eventBus.publish()` when urgent emails arrive during polling
 - [ ] Include sender, subject, and snippet in the event payload
-- [ ] Alert routing handled by event bus (Phase 3), but wire up direct Discord DM for now
-
-### Email Send/Reply (`src/skills/email/sender.ts`)
-- [ ] Implement SMTP client using `nodemailer`:
-  - Connect via SMTP with OAuth2 (Gmail/O365) or app password
-  - Support TLS/STARTTLS
-- [ ] Tool: `email_send`
-  - Input: `to` (string), `subject` (string), `body` (string), `cc` (optional), `bcc` (optional)
-  - Output: confirmation with message ID
-  - **Requires explicit user confirmation before sending**
-  - LLM drafts the email, presents it to the user, sends only after approval
-- [ ] Tool: `email_reply`
-  - Input: `email_id` (string — the UID of the email to reply to), `body` (string), `replyAll` (boolean, default false)
-  - Output: confirmation with message ID
-  - **Requires explicit user confirmation before sending**
-  - Preserves threading headers (`In-Reply-To`, `References`)
-- [ ] Rate limit: max 20 outbound emails per hour (configurable)
+- [ ] Phase 1's in-process `EventBus` routes events to a simple Discord DM handler
+- [ ] Phase 3 replaces the backend with Redis Streams — no changes needed in email skill code
 
 ### Security Considerations
 - [ ] IMAP credentials stored in encrypted config only
-- [ ] SMTP credentials stored in encrypted config (may share OAuth2 tokens with IMAP)
 - [ ] All email content passed through `ContentSanitizer.sanitizeEmail()` before LLM sees it
-- [ ] All outbound emails require explicit user confirmation — LLM cannot send autonomously
 - [ ] OAuth2 refresh token rotation for Gmail/O365
 
 ---
@@ -88,10 +71,10 @@
 - [ ] Tool: `calendar_upcoming`
   - Input: `days` (number, default 7)
   - Output: events for the next N days, grouped by date
-- [ ] Tool: `calendar_create`
+- [ ] Tool: `calendar_create` (`requiresConfirmation: true`)
   - Input: `title`, `startTime`, `endTime`, `location` (optional), `description` (optional)
   - Output: confirmation with event details
-  - **Requires explicit user confirmation** before creating
+  - Uses the Phase 1 confirmation token flow — user sees event preview + `confirm <token>` prompt
 - [ ] Tool: `calendar_search`
   - Input: `query` (string), `dateFrom`/`dateTo` (optional)
   - Output: matching events
@@ -130,7 +113,7 @@
 
 ### Background Reminder Checker
 - [ ] Background task checking for due reminders every 60 seconds
-- [ ] Publish `alert.reminder.due` event when a reminder crosses its due time
+- [ ] Publish `alert.reminder.due` event via `eventBus.publish()` when a reminder crosses its due time
 - [ ] For recurring reminders, auto-create next occurrence on completion
 - [ ] Snooze: update `snoozedUntil`, suppress alerts until then
 
@@ -234,15 +217,6 @@ All tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`
 - [ ] `email_search` filters by sender, date range, and query text
 - [ ] `email_flag` sets the correct IMAP flag
 
-**Email Sender (`tests/unit/skills/email/sender.test.ts`)**
-- [ ] `email_send` connects to SMTP and sends email with correct headers
-- [ ] `email_send` requires confirmation flag before sending
-- [ ] `email_reply` preserves threading headers (`In-Reply-To`, `References`)
-- [ ] `email_reply` requires confirmation flag before sending
-- [ ] Rate limiting rejects sends above threshold (20/hour)
-- [ ] Handles SMTP connection errors gracefully
-- [ ] Handles OAuth2 token refresh for SMTP
-
 **Notes Skill (`tests/unit/skills/notes/skill.test.ts`)**
 - [ ] `note_save` creates note with content and tags in Postgres
 - [ ] `note_save` auto-generates title from content if not provided
@@ -296,11 +270,6 @@ All tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`
 - [ ] Alert payload contains sender, subject, and snippet
 - [ ] Non-urgent emails do not trigger alerts
 
-**Email Send Flow (`tests/integration/email-send.test.ts`)**
-- [ ] "Reply to that email saying..." drafts reply, gets confirmation, sends via SMTP
-- [ ] "Send an email to [person] about..." composes and sends after confirmation
-- [ ] Sending without confirmation does not dispatch the email
-
 **Notes Context Integration (`tests/integration/notes-context.test.ts`)**
 - [ ] Saved notes are searchable and returned in subsequent queries
 - [ ] Notes tagged `context:always` are included in orchestrator system prompt
@@ -337,8 +306,9 @@ All tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Email inbound | IMAP via `imapflow` | Modern, promise-based, connection pooling, good TypeScript types |
+| Email access | IMAP via `imapflow` | Modern, promise-based, connection pooling, good TypeScript types |
 | Email auth | OAuth2 primary, app password fallback | Security best practice |
+| Email scope | Read-only (no SMTP/sending) | Reduces attack surface; sending can be added later |
 | Calendar protocol | CalDAV via `tsdav` | TypeScript-native, protocol-level, provider-agnostic |
 | Time parsing | `chrono-node` | Best-in-class NL date parser for JavaScript, actively maintained |
 | Reminder storage | Postgres via Drizzle | Durable, queryable, type-safe schema |
@@ -353,15 +323,13 @@ All tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`
 {
   "dependencies": {
     "imapflow": "^1.0.0",
-    "nodemailer": "^6.9.0",
     "tsdav": "^2.2.0",
     "chrono-node": "^2.7.0",
     "mailparser": "^3.7.0",
     "googleapis": "^144.0.0"
   },
   "devDependencies": {
-    "@types/mailparser": "^3.4.0",
-    "@types/nodemailer": "^6.4.0"
+    "@types/mailparser": "^3.4.0"
   }
 }
 ```

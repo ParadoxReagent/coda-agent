@@ -17,10 +17,10 @@
 - [ ] Tool: `ha_status`
   - Output: summary of key entity states (lights, locks, climate, sensors)
   - Configurable "important entities" list — not every HA entity, just the ones you care about
-- [ ] Tool: `ha_control`
+- [ ] Tool: `ha_control` (`requiresConfirmation: true` for security entities)
   - Input: `entityId` (string), `action` (string: "turn_on", "turn_off", "toggle", "set"), `attributes` (object, optional — e.g., brightness, temperature)
   - Output: confirmation of state change
-  - **Destructive action gate:** lock/unlock and security-related entities require explicit confirmation
+  - Lock/unlock and security-related entities use confirmation token flow; lights and non-security entities execute directly
 - [ ] Tool: `ha_query`
   - Input: `query` (natural language — "What's the temperature in the bedroom?")
   - Implementation: map natural language to entity lookups via HA's entity registry
@@ -95,10 +95,10 @@
 - [ ] Tool: `print_history`
   - Input: `limit` (number, default 5)
   - Output: recent print jobs with status (completed/failed/cancelled), duration, filename
-- [ ] Tool: `print_cancel`
-  - **Destructive action — requires explicit confirmation**
+- [ ] Tool: `print_cancel` (`requiresConfirmation: true`)
   - Input: none (cancels current job)
   - Output: confirmation
+  - Uses confirmation token flow
 - [ ] Tool: `print_webcam`
   - Output: snapshot URL from OctoPrint webcam (if configured)
   - Discord: embed the image directly
@@ -140,10 +140,10 @@ This is where the TypeScript stack choice pays off. Playwright is a first-class 
   - Output: extracted text/data from the page
   - Implementation: navigate to URL, get page content, optionally scope to CSS selector, use LLM to extract requested info
   - Use case: "What's the current price of [product] on Amazon?", "Check if [site] is showing any maintenance notices"
-- [ ] Tool: `browser_fill_form`
+- [ ] Tool: `browser_fill_form` (`requiresConfirmation: true`)
   - Input: `url` (string), `fields` (array of {selector, value}), `submitSelector` (string, optional)
   - Output: confirmation of form submission + resulting page title/URL
-  - **Requires explicit user confirmation** before form submission
+  - Uses confirmation token flow — user sees field summary + `confirm <token>` prompt before submission
   - Use case: automated form filling for repetitive tasks
 - [ ] Tool: `browser_pdf`
   - Input: `url` (string)
@@ -197,14 +197,36 @@ This is where the TypeScript stack choice pays off. Playwright is a first-class 
 
 ---
 
-## 5.6 Database Migrations
+## 5.6 Worker Process Architecture
+
+### Why This Matters Now
+Phase 5 skills (browser automation, HA WebSocket event stream, 3D print adaptive polling) add significant long-running background processing. Running all of this in a single orchestrator process increases memory pressure and blast radius.
+
+### Implementation
+- [ ] Define a `SkillWorker` interface for skills that need dedicated background processing:
+  - Long-lived connections (HA WebSocket, OctoPrint polling)
+  - Heavy resource usage (Playwright browser instances)
+  - Skills declare `runsInWorker: true` in their manifest
+- [ ] Worker skills run in separate Node.js child processes via `worker_threads` or `child_process.fork()`:
+  - Communicate with the orchestrator via a message channel
+  - Tool calls are dispatched to the worker process, results returned to orchestrator
+  - Worker crash does not take down the orchestrator
+- [ ] Per-skill resource limits:
+  - Memory ceiling per worker (configurable, e.g., 512MB for browser skill)
+  - Concurrency limit per skill (e.g., max 3 concurrent browser operations)
+  - Circuit breaker: if worker crashes repeatedly, disable skill and alert
+- [ ] Skills that don't declare `runsInWorker` continue to run in-process (no change for simple skills)
+
+---
+
+## 5.7 Database Migrations
 
 - [ ] Drizzle migration: `ha_entity_mapping` table (optional, may use config file instead)
 - [ ] Drizzle migration: `browser_sessions` table for persistent browser contexts
 
 ---
 
-## 5.7 Test Suite — Phase 5 Gate
+## 5.8 Test Suite — Phase 5 Gate
 
 All tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`.
 
@@ -262,6 +284,14 @@ All tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`
 - [ ] Lists active browser sessions
 - [ ] Deletes browser session and cleans up storage
 - [ ] Sessions survive skill restart (persisted to disk)
+
+**Worker Process (`tests/unit/core/worker.test.ts`)**
+- [ ] Skill with `runsInWorker: true` is launched in a separate process
+- [ ] Tool calls are dispatched to worker and results returned to orchestrator
+- [ ] Worker crash does not affect orchestrator
+- [ ] Worker crash triggers circuit breaker after repeated failures
+- [ ] Memory ceiling is enforced per worker
+- [ ] Concurrency limit prevents exceeding max parallel operations
 
 ### Integration Tests
 

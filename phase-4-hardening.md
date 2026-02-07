@@ -8,6 +8,8 @@
 
 ## 4.1 Prompt Injection Hardening
 
+> **Note:** Phase 1 established a security baseline: `ContentSanitizer` for external content, pino log redaction paths for PII, retention TTL constants, and `requiresConfirmation` token flow for destructive actions. This phase builds on that foundation with adversarial testing and comprehensive auditing.
+
 ### Sanitization Audit
 - [ ] Audit every path where external content reaches the LLM:
   - Email bodies (already sanitized in Phase 2 — verify coverage)
@@ -96,7 +98,33 @@
 
 ---
 
-## 4.4 Rate Limiting & Abuse Prevention
+## 4.4 External Skill Hardening
+
+### Skill Validation
+- [ ] Validate external skill tool definitions against schema (Zod):
+  - Tool names must be alphanumeric + underscores, no collisions with built-in skills
+  - Input schemas must be valid JSON Schema
+  - Reject skills with invalid tool definitions at load time
+- [ ] Validate that external skills don't declare tools with names already registered by internal skills
+- [ ] Log all external skill load attempts (success and failure) at INFO level
+
+### Skill Isolation
+- [ ] External skill `execute()` calls run in isolated error boundaries:
+  - Uncaught exceptions are caught and logged, not propagated to orchestrator
+  - Skill marked as `degraded` after N consecutive execution failures (configurable)
+  - Skill automatically re-enabled after cooldown period
+- [ ] Per-skill resource limits:
+  - Execution timeout (default: 30s, configurable per skill in manifest)
+  - Per-skill rate limiting (default: 60 tool calls per hour)
+  - Redis key namespace isolation (skills cannot read other skills' keys)
+
+### Skill Audit
+- [ ] Log every tool call from external skills with: skill name, tool name, input (redacted), output (truncated), duration
+- [ ] Optional: skill activity summary in `/status` command output
+
+---
+
+## 4.5 Rate Limiting & Abuse Prevention
 
 ### Per-Conversation Limits
 - [ ] Max tool calls per conversation turn: 10 (configurable)
@@ -116,7 +144,7 @@
 
 ---
 
-## 4.5 Slack Bot (Secondary Interface)
+## 4.6 Slack Bot (Secondary Interface)
 
 ### Implementation (`src/interfaces/slack-bot.ts`)
 - [ ] Use `@slack/bolt` with Socket Mode (no inbound webhooks needed)
@@ -138,7 +166,7 @@
 
 ---
 
-## 4.6 User Preference System
+## 4.7 User Preference System
 
 ### Modes & Commands
 - [ ] `/dnd` — Do Not Disturb: suppress all alerts except system errors
@@ -155,7 +183,7 @@
 
 ---
 
-## 4.7 Documentation
+## 4.8 Documentation
 
 - [ ] Write `SETUP.md` — step-by-step deployment guide:
   - Prerequisites (Docker, Discord bot setup, API keys)
@@ -164,11 +192,24 @@
   - First run and verification
 - [ ] Write `SKILLS.md` — what each skill does, its tools, and example interactions
 - [ ] Write `SECURITY.md` — security model, threat model, and hardening checklist
+- [ ] Write `SKILL-SDK.md` — guide for creating external skills:
+  - Skill manifest (`coda-skill.json`) schema and fields
+  - `Skill` interface contract and lifecycle hooks
+  - `SkillContext` API reference (logger, redis, db, eventBus, scheduler)
+  - `SkillToolDefinition` format, including `requiresConfirmation`
+  - Step-by-step tutorial: creating a "hello world" skill from scratch
+  - How to declare config requirements and service dependencies
+  - How to publish events and register scheduled tasks
+  - Testing skills with `createMockSkillContext()`
+  - Versioning and `coda_sdk_version` compatibility
+- [ ] Create `skill-template/` — minimal boilerplate for a new external skill:
+  - `coda-skill.json`, `tsconfig.json`, `package.json`, `src/index.ts`
+  - Can be copied and customized by users
 - [ ] Add inline code documentation for complex logic (orchestrator, event bus, baseline)
 
 ---
 
-## 4.8 Test Suite — Phase 4 Gate
+## 4.9 Test Suite — Phase 4 Gate
 
 All tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`.
 
@@ -199,6 +240,15 @@ All tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`
 - [ ] User is notified when failover occurs
 - [ ] Fallback message returned when all providers are unavailable
 - [ ] Recovery auto-switches back to primary provider
+
+**External Skill Hardening (`tests/unit/skills/skill-hardening.test.ts`)**
+- [ ] Skill with duplicate tool name (colliding with internal skill) is rejected
+- [ ] Skill with invalid tool input schema is rejected at load time
+- [ ] Skill execution crash is caught and does not propagate to orchestrator
+- [ ] Skill marked as `degraded` after N consecutive execution failures
+- [ ] Degraded skill is re-enabled after cooldown
+- [ ] Per-skill rate limit enforced independently of other skills
+- [ ] Skill Redis key access is namespaced (cannot read keys outside its prefix)
 
 **Rate Limiting (`tests/unit/core/rate-limiting.test.ts`)**
 - [ ] Per-conversation tool call limit enforced

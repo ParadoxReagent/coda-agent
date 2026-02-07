@@ -105,7 +105,7 @@ OpenClaw is a 117k-star monolith designed for general audiences. It's impressive
 | Redis | Existing Redis instance (or dedicated) | Cache + event bus |
 | Postgres | Existing Postgres instance | Separate database |
 | Discord/Slack Bot | Same container as Core | Outbound only, no inbound ports |
-| Email Poller | Within Core process | IMAP polling, no SMTP needed for reads |
+| Email Poller | Within Core process | IMAP polling (read-only) |
 | UniFi Monitor | Within Core process | Polls UniFi Controller API |
 | Plex Control | Within Core process | Talks to Plex API on LAN |
 
@@ -257,19 +257,15 @@ This means if you message via Discord in the morning and Slack in the afternoon,
 - `email_read` — Read full content of a specific email
 - `email_search` — Search emails by sender, subject, date range
 - `email_flag` — Flag/star an email for follow-up
-- `email_send` — Compose and send a new email (requires confirmation)
-- `email_reply` — Reply to a specific email (requires confirmation)
 
 **Security:**
 - IMAP credentials stored in encrypted config (age/sops or Vault)
-- SMTP for outbound email (same credentials or dedicated SMTP config)
-- All send/reply actions require explicit user confirmation before sending
 - OAuth2 for Gmail/O365, app passwords for others
 
 ```typescript
 class EmailSkill implements Skill {
   readonly name = "email";
-  readonly description = "Check, search, and summarize emails";
+  readonly description = "Check, search, and read emails (read-only)";
 
   getTools(): LLMToolDefinition[] {
     return [
@@ -846,7 +842,7 @@ Each phase has a detailed plan document with implementation tasks, test suites, 
 - [ ] **Pass `npm run test:phase1`**
 
 ### Phase 2: First Skills (Week 2)
-- [ ] Email skill (IMAP polling + summarization + SMTP send/reply)
+- [ ] Email skill (IMAP polling + summarization)
 - [ ] Calendar skill (CalDAV or Google Calendar)
 - [ ] Reminder skill (Postgres-backed)
 - [ ] Notes/knowledge base skill (personal reference store)
@@ -890,7 +886,6 @@ Each phase has a detailed plan document with implementation tasks, test suites, 
     "postgres": "^3.4.0",
     "zod": "^3.24.0",
     "imapflow": "^1.0.0",
-    "nodemailer": "^6.9.0",
     "tsdav": "^2.2.0",
     "chrono-node": "^2.7.0",
     "croner": "^9.0.0",

@@ -6,12 +6,13 @@
 
 ---
 
-## 3.1 Event Bus
+## 3.1 Event Bus (Redis Streams Upgrade)
+
+Phase 1 introduced a thin in-process `EventBus` interface with `publish()` and `subscribe()` methods. Phase 2 skills already publish events through this interface. This phase replaces the in-process implementation with Redis Streams for durability, consumer groups, and cross-process delivery — **without changing any producer or consumer code.**
 
 ### Redis Streams Implementation (`src/core/events.ts`)
-- [ ] Implement `EventBus` class using Redis Streams:
-  - `publish(eventType, payload)` — publish an event to a stream
-  - `subscribe(eventPattern, callback)` — register a handler for event types
+- [ ] Replace the in-process `EventBus` implementation with Redis Streams:
+  - Same `publish(event)` and `subscribe(pattern, handler)` interface
   - `startConsumer()` — background task consuming events from streams
 - [ ] Event format:
   ```typescript
@@ -94,10 +95,10 @@
 - [ ] Tool: `unifi_client_lookup`
   - Input: `query` (MAC, hostname, or IP)
   - Output: detailed client info + history
-- [ ] Tool: `unifi_block_client`
+- [ ] Tool: `unifi_block_client` (`requiresConfirmation: true`)
   - Input: `mac` (string)
-  - Output: confirmation (requires explicit user confirmation before execution)
-  - **Destructive action — orchestrator must confirm with user before executing**
+  - Output: confirmation
+  - Uses the Phase 1 confirmation token flow — user sees client details + `confirm <token>` prompt
 
 ---
 

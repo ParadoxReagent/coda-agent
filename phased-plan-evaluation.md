@@ -35,7 +35,7 @@ For Phase 1, prioritize: boot path + one provider + one tool call cycle + one in
 **Recommendation:** Pull forward a "minimum security baseline" into Phase 1:
 - structured log redaction policy (default deny for message content)
 - explicit retention policy for Redis/Postgres records
-- per-tool permission checks for high-risk actions (email send/create calendar events)
+- per-tool permission checks for high-risk actions (create calendar events, other state-changing tools)
 - auditable confirmation tokens for state-changing actions
 
 ---
@@ -100,3 +100,23 @@ The roadmap is strong and thoughtfully staged, but it will benefit from:
 - and a testing strategy that separates deterministic gates from live-service checks.
 
 With those adjustments, the plan should be significantly more predictable to execute and safer to run day-to-day.
+
+---
+
+## Status: APPLIED
+
+The following recommendations have been incorporated into the phase docs:
+
+| # | Recommendation | Applied to | Status |
+|---|---------------|------------|--------|
+| 1 | Narrower MVP slices | Not doc-changed (execution discipline) | Acknowledged |
+| 2 | Event abstraction before event bus | Phase 1 §1.3 — thin EventBus interface | Done |
+| 3 | Security baseline pulled forward | Phase 1 §1.3 — log redaction, retention TTLs, confirmation flow | Done |
+| 4 | Provider capability matrix | Phase 1 §1.2 — 3 adapters, capabilities config, Google SDK | Done |
+| 5 | Confirmation UX with action hashes | Phase 1 §1.5 — confirmation tokens, single-use, 5min TTL | Done |
+| 6 | Tiered test gates | Phase 1 §1.9 — gate/advisory/nightly tiers | Done |
+| 7 | Service boundaries for Phase 5+ | Phase 5 §5.6 — worker process architecture | Done |
+
+Additionally applied:
+- **External skill SDK** — Phase 1 §1.5 (SkillContext, manifest, external loading), Phase 4 §4.4 (hardening), Phase 4 §4.8 (SKILL-SDK.md docs)
+- **Worker processes** — Phase 5 §5.6 (runsInWorker flag, resource limits, circuit breakers)
