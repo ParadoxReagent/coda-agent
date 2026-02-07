@@ -2,7 +2,7 @@
 
 **Timeline:** Post-MVP
 **Depends on:** Phases 1-4 (stable core with event bus and alert routing)
-**Goal:** Expand coda's capabilities into smart home control, environmental context, maker tool monitoring, and web-based task automation.
+**Goal:** Expand coda's capabilities into smart home control, environmental context, and web-based task automation.
 
 ---
 
@@ -81,42 +81,7 @@
 
 ---
 
-## 5.3 3D Print Monitor Skill
-
-### Integration Approach
-- [ ] Support OctoPrint REST API (primary) and Klipper/Moonraker API (alternative)
-- [ ] LAN-only access, API key authentication
-- [ ] Configurable poll interval (default: 30 seconds during active print, 5 minutes idle)
-
-### Tools
-- [ ] Tool: `print_status`
-  - Output: current print job status — file name, progress %, time elapsed, time remaining, temps (bed/nozzle)
-  - If idle: "No active print job. Printer is idle."
-- [ ] Tool: `print_history`
-  - Input: `limit` (number, default 5)
-  - Output: recent print jobs with status (completed/failed/cancelled), duration, filename
-- [ ] Tool: `print_cancel` (`requiresConfirmation: true`)
-  - Input: none (cancels current job)
-  - Output: confirmation
-  - Uses confirmation token flow
-- [ ] Tool: `print_webcam`
-  - Output: snapshot URL from OctoPrint webcam (if configured)
-  - Discord: embed the image directly
-
-### Proactive Alerts
-- [ ] `alert.print.completed` — print job finished successfully
-- [ ] `alert.print.failed` — print job failed (thermal runaway, disconnect, error state)
-- [ ] `alert.print.progress` — configurable milestone notifications (25%, 50%, 75%)
-- [ ] Respect quiet hours for progress alerts, but always alert on failures (thermal safety)
-
-### Adaptive Polling
-- [ ] Poll frequently during active prints (30s)
-- [ ] Poll infrequently when idle (5min)
-- [ ] Stop polling entirely if printer is powered off / unreachable (check every 15min)
-
----
-
-## 5.4 Browser Automation Skill
+## 5.3 Browser Automation Skill
 
 ### Why TypeScript Makes This Natural
 This is where the TypeScript stack choice pays off. Playwright is a first-class Node.js library — no bindings or shims. It can run in a dedicated Node worker process while staying in the same TypeScript/JS ecosystem as the rest of coda.
@@ -167,7 +132,7 @@ This is where the TypeScript stack choice pays off. Playwright is a first-class 
 
 ---
 
-## 5.5 Web Search Skill
+## 5.4 Web Search Skill
 
 ### Integration Approach
 - [ ] Primary: self-hosted SearXNG instance (privacy-respecting, no API key needed)
@@ -197,7 +162,7 @@ This is where the TypeScript stack choice pays off. Playwright is a first-class 
 
 ---
 
-## 5.6 Worker Process Architecture
+## 5.5 Worker Process Architecture
 
 ### Why This Matters Now
 Phase 5 skills (browser automation, HA WebSocket event stream, 3D print adaptive polling) add significant long-running background processing. Running all of this in a single orchestrator process increases memory pressure and blast radius.
@@ -220,14 +185,14 @@ Phase 5 skills (browser automation, HA WebSocket event stream, 3D print adaptive
 
 ---
 
-## 5.7 Database Migrations
+## 5.6 Database Migrations
 
 - [ ] Drizzle migration: `ha_entity_mapping` table (optional, may use config file instead)
 - [ ] Drizzle migration: `browser_sessions` table for persistent browser contexts
 
 ---
 
-## 5.8 Test Suite — Phase 5 Gate
+## 5.7 Test Suite — Phase 5 Gate
 
 Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`.
 - Gate: deterministic unit + integration tests (no live network dependency)
@@ -251,14 +216,6 @@ Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:p
 - [ ] `weather_alerts` returns active warnings or "no alerts"
 - [ ] Weather data is cached in Redis with 30-min TTL
 - [ ] Stale cache serves last-known data when API is unreachable
-
-**3D Print Monitor (`tests/unit/skills/print/skill.test.ts`)**
-- [ ] `print_status` returns progress during active print
-- [ ] `print_status` returns idle message when no print is active
-- [ ] `print_history` returns recent jobs with correct status
-- [ ] `print_cancel` requires confirmation flag before executing
-- [ ] Adaptive polling switches between active (30s) and idle (5min) intervals
-- [ ] Handles printer unreachable gracefully
 
 **Browser Automation (`tests/unit/skills/browser/skill.test.ts`)**
 - [ ] `browser_navigate` returns page title and final URL
@@ -309,11 +266,6 @@ Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:p
 - [ ] Morning briefing includes weather section
 - [ ] Calendar events with locations include location-specific weather
 
-**Print Alert Pipeline (`tests/integration/print-alerts.test.ts`)**
-- [ ] Print completion publishes event that reaches Discord
-- [ ] Print failure publishes high-severity alert that bypasses quiet hours
-- [ ] Progress milestones publish at configured percentages
-
 **Browser E2E (`tests/integration/browser-e2e.test.ts`)**
 - [ ] Navigate to URL → screenshot → extract content (full workflow)
 - [ ] Form fill with confirmation → submit → verify result page
@@ -323,7 +275,6 @@ Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:p
 ### Test Helpers (additions to previous phases)
 - [ ] `createMockHAController()` — mock HA API with configurable entities and states
 - [ ] `createMockWeatherAPI()` — mock Open-Meteo responses
-- [ ] `createMockOctoPrint()` — mock OctoPrint API with configurable print state
 - [ ] `createMockBrowser()` — mock Playwright browser with configurable page responses
 - [ ] `createMockSearchEngine()` — mock SearXNG/Tavily API with configurable results
 
@@ -335,15 +286,13 @@ Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:p
 2. "What's the temperature?" → returns readings from configured HA sensors
 3. "What's the weather?" → returns current conditions from Open-Meteo
 4. Morning briefing now includes weather section
-5. "How's the print going?" → returns current print progress with temps and ETA
-6. Print failure triggers immediate Discord alert
-7. "Screenshot my Grafana dashboard" → returns rendered screenshot in Discord
-8. "Check the price of [product] on [URL]" → navigates, extracts, returns price
-9. Browser form submission requires explicit user confirmation
-10. Severe weather warnings trigger a proactive alert
-11. "Search for Node.js 22 release notes" returns relevant web results
-12. "Any news about [topic]?" returns recent news articles
-13. **`npm run test:phase5` passes with 0 failures**
+5. "Screenshot my Grafana dashboard" → returns rendered screenshot in Discord
+6. "Check the price of [product] on [URL]" → navigates, extracts, returns price
+7. Browser form submission requires explicit user confirmation
+8. Severe weather warnings trigger a proactive alert
+9. "Search for Node.js 22 release notes" returns relevant web results
+10. "Any news about [topic]?" returns recent news articles
+11. **`npm run test:phase5` passes with 0 failures**
 
 ---
 
@@ -354,7 +303,6 @@ Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:p
 | HA integration | REST API (not HACS/custom component) | Simpler, no HA addon dependency |
 | HA entity mapping | Config file + fuzzy match fallback | Explicit control, graceful fallback |
 | Weather API | Open-Meteo | Free, no key, reliable, good coverage |
-| Print API | OctoPrint primary, Moonraker secondary | OctoPrint is more common, Moonraker for Klipper |
 | Polling strategy | Adaptive (active vs idle) | Balance responsiveness with resource usage |
 | Browser engine | Playwright (Chromium) | First-class Node.js, same runtime, best automation API |
 | Worker isolation model | `child_process.fork()` for worker skills | Process boundary gives stronger crash and memory isolation than `worker_threads` |
@@ -373,4 +321,4 @@ Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:p
 }
 ```
 
-Note: Home Assistant, Weather, OctoPrint, and SearXNG integrations use native `fetch` — no additional SDK dependencies. Playwright bundles its own Chromium and requires `npx playwright install chromium` during Docker image build. SearXNG runs as a separate Docker container in the compose stack.
+Note: Home Assistant, Weather, and SearXNG integrations use native `fetch` — no additional SDK dependencies. Playwright bundles its own Chromium and requires `npx playwright install chromium` during Docker image build. SearXNG runs as a separate Docker container in the compose stack.
