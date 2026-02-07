@@ -4,6 +4,7 @@
  */
 import type { Logger } from "../utils/logger.js";
 import type { EventBus } from "../core/events.js";
+import type { Database } from "../db/index.js";
 
 /**
  * A Redis-like client interface that auto-prefixes keys with the skill name.
@@ -31,4 +32,7 @@ export interface SkillContext {
 
   /** Event bus for publishing and subscribing to events. */
   eventBus: EventBus;
+
+  /** Database access for persistent storage (e.g. OAuth tokens). */
+  db: Database;
 }

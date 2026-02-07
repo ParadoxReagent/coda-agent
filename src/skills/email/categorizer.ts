@@ -14,7 +14,7 @@ import type {
  * 4. Default → "informational"
  */
 export function categorizeEmail(
-  email: Pick<EmailMetadata, "from" | "to" | "cc" | "subject" | "snippet" | "flags">,
+  email: Pick<EmailMetadata, "from" | "to" | "cc" | "subject" | "snippet">,
   rules: EmailCategorizationRules
 ): EmailCategory {
   const fromLower = email.from.toLowerCase();

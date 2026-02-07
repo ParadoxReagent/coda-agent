@@ -206,6 +206,7 @@ export function createMockSkillContext(
       },
     },
     eventBus: createMockEventBus(),
+    db: createMockDatabase() as unknown as SkillContext["db"],
   };
 }
 

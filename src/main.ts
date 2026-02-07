@@ -75,10 +75,10 @@ async function main() {
     }
   }
 
-  // Email registers conditionally (requires IMAP config)
+  // Email registers conditionally (requires OAuth or IMAP config)
   if (config.email) {
     try {
-      skillRegistry.register(new EmailSkill(), { imap: config.email });
+      skillRegistry.register(new EmailSkill(), config.email);
     } catch (err) {
       logger.warn({ error: err }, "Email skill not registered — missing config");
     }
@@ -140,6 +140,7 @@ async function main() {
         },
       },
       eventBus,
+      db,
     };
   });
 

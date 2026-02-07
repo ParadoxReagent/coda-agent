@@ -47,20 +47,41 @@ const DiscordConfigSchema = z.object({
   allowed_user_ids: z.array(z.string()),
 });
 
+const EmailOAuthConfigSchema = z.object({
+  client_id: z.string(),
+  client_secret: z.string(),
+  redirect_port: z.number().default(3000),
+  scopes: z.array(z.string()).default([
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
+  ]),
+});
+
 const EmailConfigSchema = z.object({
-  imap_host: z.string(),
+  // Gmail API with OAuth (preferred)
+  oauth: EmailOAuthConfigSchema.optional(),
+  gmail_user: z.string().optional(),
+
+  // Legacy IMAP config (fallback)
+  imap_host: z.string().optional(),
   imap_port: z.number().default(993),
-  imap_user: z.string(),
-  imap_pass: z.string(),
+  imap_user: z.string().optional(),
+  imap_pass: z.string().optional(),
   imap_tls: z.boolean().default(true),
+
+  // Common settings
   poll_interval_seconds: z.number().default(300),
   folders: z.array(z.string()).default(["INBOX"]),
+  labels: z.array(z.string()).default(["INBOX"]),
   categorization: z.object({
     urgent_senders: z.array(z.string()).default([]),
     urgent_keywords: z.array(z.string()).default([]),
     known_contacts: z.array(z.string()).default([]),
   }).default({}),
-});
+}).refine(
+  (data) => (data.oauth && data.gmail_user) || (data.imap_host && data.imap_user && data.imap_pass),
+  { message: "Either (oauth + gmail_user) or (imap_host + imap_user + imap_pass) must be provided" }
+);
 
 const CalendarConfigSchema = z.object({
   caldav_server_url: z.string(),
@@ -183,7 +204,17 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
       openrouter.models = ["anthropic/claude-sonnet-4-5"];
   }
 
-  // IMAP / Email overrides
+  // Gmail OAuth overrides
+  if (process.env.GMAIL_OAUTH_CLIENT_ID || process.env.GMAIL_OAUTH_CLIENT_SECRET) {
+    const email = ensureObject(config, "email");
+    const oauth = ensureObject(email, "oauth");
+    if (process.env.GMAIL_OAUTH_CLIENT_ID) oauth.client_id = process.env.GMAIL_OAUTH_CLIENT_ID;
+    if (process.env.GMAIL_OAUTH_CLIENT_SECRET) oauth.client_secret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
+    if (process.env.GMAIL_OAUTH_REDIRECT_PORT) oauth.redirect_port = parseInt(process.env.GMAIL_OAUTH_REDIRECT_PORT, 10);
+    if (process.env.GMAIL_USER) email.gmail_user = process.env.GMAIL_USER;
+  }
+
+  // IMAP / Email overrides (legacy)
   if (process.env.IMAP_HOST || process.env.IMAP_USER || process.env.IMAP_PASS) {
     const email = ensureObject(config, "email");
     if (process.env.IMAP_HOST) email.imap_host = process.env.IMAP_HOST;

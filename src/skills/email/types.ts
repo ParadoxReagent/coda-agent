@@ -5,16 +5,22 @@ export type EmailCategory =
   | "low_priority";
 
 export interface EmailMetadata {
-  uid: number;
+  // Gmail API fields
   messageId: string;
+  labels?: string[];
+
+  // IMAP compatibility fields
+  uid?: number;
+  folder?: string;
+  flags?: string[];
+
+  // Common fields
   from: string;
   to: string[];
   cc: string[];
   subject: string;
   date: string;
   snippet: string;
-  flags: string[];
-  folder: string;
   category: EmailCategory;
 }
 

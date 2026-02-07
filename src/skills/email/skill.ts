@@ -1,5 +1,8 @@
 import { ImapFlow } from "imapflow";
 import { EmailPoller } from "./poller.js";
+import { GmailClient } from "./gmail-client.js";
+import { OAuthManager } from "../../auth/oauth-manager.js";
+import { TokenStorage } from "../../auth/token-storage.js";
 import type { EmailCategorizationRules } from "./types.js";
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
@@ -12,7 +15,8 @@ export class EmailSkill implements Skill {
 
   private logger!: Logger;
   private poller!: EmailPoller;
-  private imapConfig!: {
+  private gmailClient?: GmailClient;
+  private imapConfig?: {
     host: string;
     port: number;
     user: string;
@@ -31,7 +35,7 @@ export class EmailSkill implements Skill {
           properties: {
             folder: {
               type: "string",
-              description: "Folder to check (default: INBOX)",
+              description: "Folder/label to check (default: INBOX)",
             },
             hours_back: {
               type: "number",
@@ -42,20 +46,23 @@ export class EmailSkill implements Skill {
       },
       {
         name: "email_read",
-        description: "Read a specific email by UID from the cache.",
+        description: "Read a specific email by message ID from the cache.",
         input_schema: {
           type: "object",
           properties: {
+            message_id: {
+              type: "string",
+              description: "The message ID of the email",
+            },
             uid: {
               type: "number",
-              description: "The UID of the email",
+              description: "The UID of the email (legacy IMAP)",
             },
             folder: {
               type: "string",
-              description: "Folder (default: INBOX)",
+              description: "Folder/label (default: INBOX)",
             },
           },
-          required: ["uid"],
         },
       },
       {
@@ -82,13 +89,17 @@ export class EmailSkill implements Skill {
       },
       {
         name: "email_flag",
-        description: "Flag or unflag an email on the server.",
+        description: "Flag or unflag an email (star, mark read/unread).",
         input_schema: {
           type: "object",
           properties: {
+            message_id: {
+              type: "string",
+              description: "The message ID of the email",
+            },
             uid: {
               type: "number",
-              description: "The UID of the email",
+              description: "The UID of the email (legacy IMAP)",
             },
             folder: {
               type: "string",
@@ -97,14 +108,14 @@ export class EmailSkill implements Skill {
             flag: {
               type: "string",
               enum: ["\\Flagged", "\\Seen", "\\Answered"],
-              description: "IMAP flag to add",
+              description: "Flag to add/remove",
             },
             remove: {
               type: "boolean",
               description: "If true, remove the flag instead of adding it",
             },
           },
-          required: ["uid", "flag"],
+          required: ["flag"],
         },
       },
     ];
@@ -129,47 +140,101 @@ export class EmailSkill implements Skill {
   }
 
   getRequiredConfig(): string[] {
-    return ["imap"];
+    return [];
   }
 
   async startup(ctx: SkillContext): Promise<void> {
     this.logger = ctx.logger;
 
-    this.imapConfig = {
-      host: ctx.config.imap_host as string,
-      port: (ctx.config.imap_port as number | undefined) ?? 993,
-      user: ctx.config.imap_user as string,
-      pass: ctx.config.imap_pass as string,
-      tls: (ctx.config.imap_tls as boolean | undefined) ?? true,
-    };
-
-    const folders = (ctx.config.folders as string[] | undefined) ?? ["INBOX"];
-    const pollInterval =
-      (ctx.config.poll_interval_seconds as number | undefined) ?? 300;
-    const categorization = ctx.config.categorization as
-      | Record<string, unknown>
+    const oauthConfig = ctx.config.oauth as
+      | { client_id: string; client_secret: string; redirect_port?: number; scopes?: string[] }
       | undefined;
+    const gmailUser = ctx.config.gmail_user as string | undefined;
 
-    const rules: EmailCategorizationRules = {
-      urgentSenders: (categorization?.urgent_senders as string[] | undefined) ?? [],
-      urgentKeywords: (categorization?.urgent_keywords as string[] | undefined) ?? [],
-      knownContacts: (categorization?.known_contacts as string[] | undefined) ?? [],
-    };
+    if (oauthConfig && gmailUser) {
+      // Gmail API with OAuth path
 
-    this.poller = new EmailPoller(
-      {
-        ...this.imapConfig,
-        folders,
-        pollIntervalSeconds: pollInterval,
-        categorizationRules: rules,
-      },
-      ctx.redis,
-      ctx.eventBus,
-      this.logger
-    );
 
-    this.poller.start();
-    this.logger.info("Email skill started");
+      const oauthManager = new OAuthManager({
+        clientId: oauthConfig.client_id,
+        clientSecret: oauthConfig.client_secret,
+        redirectPort: oauthConfig.redirect_port ?? 3000,
+        scopes: oauthConfig.scopes ?? [
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/gmail.modify",
+        ],
+      });
+
+      const tokenStorage = new TokenStorage(ctx.db);
+      this.gmailClient = new GmailClient(oauthManager, tokenStorage, gmailUser);
+
+      const labels = (ctx.config.labels as string[] | undefined) ?? ["INBOX"];
+      const pollInterval =
+        (ctx.config.poll_interval_seconds as number | undefined) ?? 300;
+      const categorization = ctx.config.categorization as
+        | Record<string, unknown>
+        | undefined;
+
+      const rules: EmailCategorizationRules = {
+        urgentSenders: (categorization?.urgent_senders as string[] | undefined) ?? [],
+        urgentKeywords: (categorization?.urgent_keywords as string[] | undefined) ?? [],
+        knownContacts: (categorization?.known_contacts as string[] | undefined) ?? [],
+      };
+
+      this.poller = new EmailPoller(
+        {
+          gmailClient: this.gmailClient,
+          labels,
+          pollIntervalSeconds: pollInterval,
+          categorizationRules: rules,
+        },
+        ctx.redis,
+        ctx.eventBus,
+        this.logger
+      );
+
+      this.poller.start();
+      this.logger.info("Email skill started (Gmail API with OAuth2)");
+    } else {
+      // Legacy IMAP path
+
+
+      this.imapConfig = {
+        host: ctx.config.imap_host as string,
+        port: (ctx.config.imap_port as number | undefined) ?? 993,
+        user: ctx.config.imap_user as string,
+        pass: ctx.config.imap_pass as string,
+        tls: (ctx.config.imap_tls as boolean | undefined) ?? true,
+      };
+
+      const folders = (ctx.config.folders as string[] | undefined) ?? ["INBOX"];
+      const pollInterval =
+        (ctx.config.poll_interval_seconds as number | undefined) ?? 300;
+      const categorization = ctx.config.categorization as
+        | Record<string, unknown>
+        | undefined;
+
+      const rules: EmailCategorizationRules = {
+        urgentSenders: (categorization?.urgent_senders as string[] | undefined) ?? [],
+        urgentKeywords: (categorization?.urgent_keywords as string[] | undefined) ?? [],
+        knownContacts: (categorization?.known_contacts as string[] | undefined) ?? [],
+      };
+
+      this.poller = new EmailPoller(
+        {
+          ...this.imapConfig,
+          folders,
+          pollIntervalSeconds: pollInterval,
+          categorizationRules: rules,
+        },
+        ctx.redis,
+        ctx.eventBus,
+        this.logger
+      );
+
+      this.poller.start();
+      this.logger.info("Email skill started (legacy IMAP)");
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -200,6 +265,7 @@ export class EmailSkill implements Skill {
         grouped[email.category] = [];
       }
       grouped[email.category]!.push({
+        messageId: email.messageId,
         uid: email.uid,
         from: email.from,
         subject: email.subject,
@@ -218,20 +284,26 @@ export class EmailSkill implements Skill {
   private async readEmail(
     input: Record<string, unknown>
   ): Promise<string> {
-    const uid = input.uid as number;
+    const messageId = input.message_id as string | undefined;
+    const uid = input.uid as number | undefined;
     const folder = (input.folder as string | undefined) ?? "INBOX";
 
     const emails = await this.poller.getCachedEmails(folder, 48);
-    const email = emails.find((e) => e.uid === uid);
+    const email = emails.find((e) => {
+      if (messageId && e.messageId === messageId) return true;
+      if (uid && e.uid === uid) return true;
+      return false;
+    });
 
     if (!email) {
       return JSON.stringify({
         success: false,
-        message: `Email with UID ${uid} not found in cache. It may have expired.`,
+        message: `Email not found in cache. It may have expired.`,
       });
     }
 
     return JSON.stringify({
+      messageId: email.messageId,
       uid: email.uid,
       from: email.from,
       to: email.to,
@@ -239,6 +311,7 @@ export class EmailSkill implements Skill {
       subject: email.subject,
       date: email.date,
       category: email.category,
+      labels: email.labels,
       flags: email.flags,
       snippet: email.snippet,
     });
@@ -277,6 +350,7 @@ export class EmailSkill implements Skill {
 
     return JSON.stringify({
       results: filtered.map((e) => ({
+        messageId: e.messageId,
         uid: e.uid,
         from: e.from,
         subject: e.subject,
@@ -290,18 +364,76 @@ export class EmailSkill implements Skill {
   private async flagEmail(
     input: Record<string, unknown>
   ): Promise<string> {
-    const uid = input.uid as number;
+    const messageId = input.message_id as string | undefined;
+    const uid = input.uid as number | undefined;
     const folder = (input.folder as string | undefined) ?? "INBOX";
     const flag = input.flag as string;
     const remove = (input.remove as boolean | undefined) ?? false;
 
+    if (this.gmailClient && messageId) {
+      return this.flagEmailGmail(messageId, flag, remove);
+    } else if (this.imapConfig && uid) {
+      return this.flagEmailImap(uid, folder, flag, remove);
+    } else {
+      return JSON.stringify({
+        success: false,
+        message: "Missing message_id (for Gmail) or uid (for IMAP)",
+      });
+    }
+  }
+
+  private async flagEmailGmail(
+    messageId: string,
+    flag: string,
+    remove: boolean
+  ): Promise<string> {
+    // Map IMAP flags to Gmail label operations
+    try {
+      if (flag === "\\Seen") {
+        // "Seen" means remove UNREAD label; "unseen" means add UNREAD
+        await this.gmailClient!.modifyMessage(
+          messageId,
+          remove ? ["UNREAD"] : undefined,
+          remove ? undefined : ["UNREAD"]
+        );
+      } else if (flag === "\\Flagged") {
+        await this.gmailClient!.modifyMessage(
+          messageId,
+          remove ? undefined : ["STARRED"],
+          remove ? ["STARRED"] : undefined
+        );
+      } else {
+        return JSON.stringify({
+          success: false,
+          message: `Unsupported flag for Gmail API: ${flag}. Supported: \\Flagged, \\Seen`,
+        });
+      }
+
+      return JSON.stringify({
+        success: true,
+        message: `${remove ? "Removed" : "Added"} flag "${flag}" on email ${messageId}`,
+      });
+    } catch (err) {
+      return JSON.stringify({
+        success: false,
+        message: `Failed to ${remove ? "remove" : "add"} flag: ${err instanceof Error ? err.message : "Unknown error"}`,
+      });
+    }
+  }
+
+  private async flagEmailImap(
+    uid: number,
+    folder: string,
+    flag: string,
+    remove: boolean
+  ): Promise<string> {
     const client = new ImapFlow({
-      host: this.imapConfig.host,
-      port: this.imapConfig.port,
-      secure: this.imapConfig.tls,
+      host: this.imapConfig!.host,
+      port: this.imapConfig!.port,
+      secure: this.imapConfig!.tls,
       auth: {
-        user: this.imapConfig.user,
-        pass: this.imapConfig.pass,
+        user: this.imapConfig!.user,
+        pass: this.imapConfig!.pass,
       },
       logger: false,
     });
@@ -340,7 +472,8 @@ export class EmailSkill implements Skill {
 }
 
 interface EmailSummary {
-  uid: number;
+  messageId: string;
+  uid?: number;
   from: string;
   subject: string;
   date: string;

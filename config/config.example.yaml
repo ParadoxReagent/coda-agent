@@ -78,6 +78,34 @@ server:
   port: 3000
   host: "0.0.0.0"
 
+# Email — Gmail API with OAuth2 (preferred)
+# Set up with: pnpm run setup:email-oauth
+# email:
+#   oauth:
+#     client_id: "your-client-id.apps.googleusercontent.com"
+#     client_secret: "your-client-secret"
+#     redirect_port: 3000
+#     scopes:
+#       - "https://www.googleapis.com/auth/gmail.readonly"
+#       - "https://www.googleapis.com/auth/gmail.modify"
+#   gmail_user: "your-email@gmail.com"
+#   labels:
+#     - "INBOX"
+#   poll_interval_seconds: 300
+#   categorization:
+#     urgent_senders: []
+#     urgent_keywords: []
+#     known_contacts: []
+
+# Email — Legacy IMAP (fallback)
+# email:
+#   imap_host: "imap.gmail.com"
+#   imap_user: "your-email@gmail.com"
+#   imap_pass: "your-app-password"
+#   folders:
+#     - "INBOX"
+#   poll_interval_seconds: 300
+
 skills:
   external_dirs: []
   external_policy:

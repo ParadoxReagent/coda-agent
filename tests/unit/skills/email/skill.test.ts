@@ -92,7 +92,7 @@ describe("EmailSkill", () => {
 
   it("has correct metadata", () => {
     expect(skill.name).toBe("email");
-    expect(skill.getRequiredConfig()).toEqual(["imap"]);
+    expect(skill.getRequiredConfig()).toEqual([]);
   });
 
   it("registers 4 tools", () => {

@@ -17,20 +17,23 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "setup:email-oauth": "tsx src/cli/setup-email-oauth.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@google/genai": "^1.0.0",
-    "openai": "^4.80.0",
+    "chrono-node": "^2.7.0",
     "discord.js": "^14.16.0",
     "drizzle-orm": "^0.36.0",
     "fastify": "^5.2.0",
+    "googleapis": "^171.4.0",
+    "imapflow": "^1.0.0",
     "ioredis": "^5.4.0",
     "js-yaml": "^4.1.0",
-    "chrono-node": "^2.7.0",
-    "imapflow": "^1.0.0",
     "mailparser": "^3.7.0",
+    "open": "^11.0.0",
+    "openai": "^4.80.0",
     "pino": "^9.6.0",
     "postgres": "^3.4.0",
     "semver": "^7.6.0",
@@ -44,10 +47,10 @@
     "@types/semver": "^7.5.0",
     "drizzle-kit": "^0.30.0",
     "ioredis-mock": "^8.9.0",
+    "pino-pretty": "^13.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "pino-pretty": "^13.0.0"
+    "vitest": "^3.0.0"
   },
   "engines": {
     "node": ">=22.0.0"

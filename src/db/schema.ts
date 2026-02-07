@@ -8,6 +8,7 @@ import {
   varchar,
   index,
   uuid,
+  uniqueIndex,
   customType,
 } from "drizzle-orm/pg-core";
 
@@ -122,5 +123,25 @@ export const notes = pgTable(
   (table) => [
     index("notes_user_idx").on(table.userId),
     index("notes_tags_idx").on(table.tags),
+  ]
+);
+
+/** OAuth tokens for external service authentication. */
+export const oauthTokens = pgTable(
+  "oauth_tokens",
+  {
+    id: serial("id").primaryKey(),
+    service: varchar("service", { length: 50 }).notNull(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token").notNull(),
+    tokenType: varchar("token_type", { length: 50 }).default("Bearer").notNull(),
+    expiryDate: timestamp("expiry_date", { withTimezone: true }).notNull(),
+    scope: text("scope").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("oauth_tokens_service_user_idx").on(table.service, table.userId),
   ]
 );
