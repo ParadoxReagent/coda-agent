@@ -456,7 +456,8 @@ External skills must include a manifest file in their package root.
     },
     "publisher": {
       "id": "local-user-or-team",
-      "signature": "optional-signature"
+      "signingKeyId": "local-user-key-2026-01",
+      "signature": "base64-ed25519-signature-over-entry-hash"
     },
     "runsInWorker": false,
     "coda_sdk_version": "^1.0.0"
@@ -466,7 +467,7 @@ External skills must include a manifest file in their package root.
 - [ ] `requires.config` — config keys the skill needs (validated before startup)
 - [ ] `requires.services` — which core services the skill needs (`redis`, `postgres`, `eventBus`, `scheduler`)
 - [ ] `integrity.sha256` — required for external skills; loader verifies `entry` hash before import
-- [ ] `publisher` — optional signing metadata for trusted-source verification
+- [ ] `publisher` — signing metadata (required for external skills in production; optional only for local dev unsigned mode)
 - [ ] `runsInWorker` — optional boolean; if `true`, skill is eligible for worker-process execution (Phase 5)
 - [ ] `coda_sdk_version` — semver range for SDK compatibility checking
 
@@ -480,16 +481,22 @@ External skills must include a manifest file in their package root.
 - [ ] **External discovery:** scan directories listed in `config.skills.external_dirs`:
   ```yaml
   skills:
-    external_dirs:
-      - "/opt/coda-skills"       # user's custom skills directory
-      - "./custom-skills"        # relative to project root
+    external_dirs: []             # default: disabled (explicit opt-in)
+    external_policy:
+      mode: "strict"              # strict (prod) | dev
+      trusted_signing_keys: []    # allowed signing key IDs in strict mode
+      allow_unsigned_local: false # true only in dev for local iteration
+      allowed_local_unsigned_dirs:
+        - "./custom-skills"       # only used when allow_unsigned_local=true
   ```
   - Each subdirectory must contain a `coda-skill.json` manifest
   - Directory and file-permission checks on manifests/entries (not world-writable)
   - Load via dynamic `import()` of the manifest's `entry` path
   - Resolve `entry` to a canonical path and reject path traversal/symlink escape outside the skill directory
   - Verify `integrity.sha256` before import; reject on mismatch
-  - Optional trusted-publisher policy: allowlist `publisher.id` or signature key IDs
+  - Enforce trusted-source verification:
+    - `strict` mode (default for prod): signature + trusted signing key required
+    - `dev` mode: unsigned skills allowed only from explicitly allowlisted local directories
   - Validate manifest schema and SDK version compatibility before loading
 - [ ] Skill load failures are logged at ERROR but do not prevent other skills from loading
 
@@ -799,6 +806,9 @@ Tests are classified into tiers to prevent external flakiness from blocking deve
 - [ ] Validates manifest schema (rejects invalid manifests with clear error)
 - [ ] Checks `coda_sdk_version` compatibility (rejects incompatible versions)
 - [ ] Verifies `integrity.sha256` of manifest `entry` before import
+- [ ] Strict mode rejects missing/invalid publisher signatures
+- [ ] Strict mode rejects signatures from untrusted signing keys
+- [ ] Dev mode allows unsigned skills only from `allowed_local_unsigned_dirs`
 - [ ] Rejects entry path traversal/symlink escape outside the skill directory
 - [ ] Rejects skills from insecure file permissions (world-writable manifests/entries)
 - [ ] Loads skill module via dynamic `import()` from manifest `entry` path

@@ -108,7 +108,8 @@
 - [ ] Validate that external skills don't declare tools with names already registered by internal skills
 - [ ] Enforce external skill trust policy:
   - Require integrity hash verification (`integrity.sha256`) before load
-  - Optional publisher allowlist/signature verification for production
+  - Require publisher signature verification and trusted signing key allowlist in production
+  - Permit unsigned local skills only in explicit dev mode with directory allowlist
   - Reject skills from writable-by-others locations
 - [ ] Log all external skill load attempts (success and failure) at INFO level
 
@@ -257,7 +258,9 @@ Gate-tier tests must pass before proceeding to Phase 5. Run with `npm run test:p
 - [ ] Skill with duplicate tool name (colliding with internal skill) is rejected
 - [ ] Skill with invalid tool input schema is rejected at load time
 - [ ] Skill with invalid integrity hash is rejected at load time
-- [ ] Skill from disallowed publisher/source is rejected when trusted-publisher policy is enabled
+- [ ] Production mode rejects external skill with missing or invalid publisher signature
+- [ ] Skill from disallowed publisher/signing key is rejected in production mode
+- [ ] Dev mode allows unsigned local skill only from configured allowlisted directories
 - [ ] Skill execution crash is caught and does not propagate to orchestrator
 - [ ] Skill marked as `degraded` after N consecutive execution failures
 - [ ] Degraded skill is re-enabled after cooldown

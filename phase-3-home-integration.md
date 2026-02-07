@@ -132,10 +132,13 @@ The event bus handles reactive events, but coda also needs to run actions on a s
 ### Tools
 - [ ] Tool: `scheduler_list`
   - Output: all registered scheduled tasks with cron expression, last run, next run, status
-- [ ] Tool: `scheduler_toggle`
+- [ ] Tool: `scheduler_toggle` (`requiresConfirmation: true`)
   - Input: `taskName` (string), `enabled` (boolean)
-  - Output: confirmation of enable/disable
+  - Output: confirmation of enable/disable + audit event ID
   - Use case: "Disable the email poller" or "Re-enable UniFi monitoring"
+- [ ] `scheduler_toggle` enforces task sensitivity policy:
+  - security-critical tasks (`health.check`, alert/monitoring pollers) always require explicit confirmation
+  - writes immutable audit events (`scheduler.task_toggled`) with userId, taskName, previous state, new state, timestamp
 
 ### Configuration
 ```yaml
@@ -234,12 +237,14 @@ Gate-tier tests must pass before proceeding to Phase 4. Run with `npm run test:p
 **Task Scheduler (`tests/unit/core/scheduler.test.ts`)**
 - [ ] Registers tasks with cron expressions and executes on schedule
 - [ ] `scheduler_list` returns all tasks with next run time and status
-- [ ] `scheduler_toggle` enables/disables a task
+- [ ] `scheduler_toggle` requires confirmation token before enabling/disabling a task
+- [ ] `scheduler_toggle` enables/disables a task after valid confirmation
 - [ ] Disabled tasks do not execute
 - [ ] Failed tasks retry once, then skip until next scheduled run
 - [ ] Failed tasks publish `alert.system.task_failed` event
 - [ ] Skills can register custom scheduled tasks at startup
 - [ ] Task execution is logged with duration and success/failure
+- [ ] `scheduler_toggle` writes immutable `scheduler.task_toggled` audit events
 
 **Alert Router (`tests/unit/core/alerts.test.ts`)**
 - [ ] Routes events to configured channels based on event type

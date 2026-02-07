@@ -42,7 +42,9 @@
 
 ### Integration Approach
 - [ ] Use Proxmox VE REST API (LAN-only)
-- [ ] Authenticate with API token (least privilege — PVEAuditor role)
+- [ ] Split credentials by privilege:
+  - Read-only token (`PVEAuditor`) for `proxmox_status`, `proxmox_vms`, `proxmox_vm_detail`
+  - Action token (minimal VM power-control scope, restricted VM/pool allowlist) for `proxmox_vm_action`
 - [ ] Async HTTP client via native `fetch`
 
 ### Tools
@@ -56,7 +58,8 @@
   - Output: detailed VM info — config, resource usage, snapshots, network
 - [ ] Tool: `proxmox_vm_action`
   - Input: `vmid` (number), `action` ("start", "stop", "restart", "shutdown")
-  - **Destructive action — requires explicit confirmation for stop/restart/shutdown**
+  - **State-changing action — requires explicit confirmation for all actions (`start`, `stop`, `restart`, `shutdown`)**
+  - Enforce configurable `allowed_vmids`/pool allowlist before execution
   - Output: confirmation of action
 
 ### Proactive Alerts
@@ -151,8 +154,8 @@ Gate-tier tests must pass before proceeding to Phase 7. Run with `npm run test:p
 - [ ] `proxmox_vms` returns VM list filtered by status
 - [ ] `proxmox_vm_detail` returns detailed info for valid VMID
 - [ ] `proxmox_vm_detail` returns error for invalid VMID
-- [ ] `proxmox_vm_action` requires confirmation for stop/restart/shutdown actions
-- [ ] `proxmox_vm_action` executes start without confirmation
+- [ ] `proxmox_vm_action` requires confirmation for all state-changing actions
+- [ ] `proxmox_vm_action` rejects actions for VMIDs outside configured allowlist
 - [ ] Handles Proxmox API unreachable gracefully
 
 **Proxmox Monitor (`tests/unit/skills/proxmox/monitor.test.ts`)**
