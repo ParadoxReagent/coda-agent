@@ -112,6 +112,11 @@ export class SkillRegistry {
     return tool?.requiresConfirmation === true;
   }
 
+  /** Get a registered skill by name. */
+  getSkillByName(name: string): Skill | undefined {
+    return this.skills.get(name)?.skill;
+  }
+
   /** List all registered skills with their descriptions. */
   listSkills(): Array<{ name: string; description: string; tools: string[] }> {
     return Array.from(this.skills.values()).map(({ skill, tools }) => ({

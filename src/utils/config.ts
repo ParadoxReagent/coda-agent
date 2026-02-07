@@ -47,6 +47,40 @@ const DiscordConfigSchema = z.object({
   allowed_user_ids: z.array(z.string()),
 });
 
+const EmailConfigSchema = z.object({
+  imap_host: z.string(),
+  imap_port: z.number().default(993),
+  imap_user: z.string(),
+  imap_pass: z.string(),
+  imap_tls: z.boolean().default(true),
+  poll_interval_seconds: z.number().default(300),
+  folders: z.array(z.string()).default(["INBOX"]),
+  categorization: z.object({
+    urgent_senders: z.array(z.string()).default([]),
+    urgent_keywords: z.array(z.string()).default([]),
+    known_contacts: z.array(z.string()).default([]),
+  }).default({}),
+});
+
+const CalendarConfigSchema = z.object({
+  caldav_server_url: z.string(),
+  caldav_username: z.string(),
+  caldav_password: z.string(),
+  timezone: z.string().default("America/New_York"),
+  default_calendar: z.string().optional(),
+});
+
+const RemindersConfigSchema = z.object({
+  timezone: z.string().default("America/New_York"),
+  check_interval_seconds: z.number().default(60),
+  default_snooze_minutes: z.number().default(15),
+});
+
+const NotesConfigSchema = z.object({
+  max_note_length: z.number().default(10000),
+  default_list_limit: z.number().default(20),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -65,6 +99,10 @@ const AppConfigSchema = z.object({
       host: z.string().default("0.0.0.0"),
     })
     .default({}),
+  email: EmailConfigSchema.optional(),
+  calendar: CalendarConfigSchema.optional(),
+  reminders: RemindersConfigSchema.optional(),
+  notes: NotesConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -143,6 +181,22 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
       openrouter.base_url = "https://openrouter.ai/api/v1";
     if (!openrouter.models)
       openrouter.models = ["anthropic/claude-sonnet-4-5"];
+  }
+
+  // IMAP / Email overrides
+  if (process.env.IMAP_HOST || process.env.IMAP_USER || process.env.IMAP_PASS) {
+    const email = ensureObject(config, "email");
+    if (process.env.IMAP_HOST) email.imap_host = process.env.IMAP_HOST;
+    if (process.env.IMAP_USER) email.imap_user = process.env.IMAP_USER;
+    if (process.env.IMAP_PASS) email.imap_pass = process.env.IMAP_PASS;
+  }
+
+  // CalDAV / Calendar overrides
+  if (process.env.CALDAV_SERVER_URL || process.env.CALDAV_USERNAME || process.env.CALDAV_PASSWORD) {
+    const calendar = ensureObject(config, "calendar");
+    if (process.env.CALDAV_SERVER_URL) calendar.caldav_server_url = process.env.CALDAV_SERVER_URL;
+    if (process.env.CALDAV_USERNAME) calendar.caldav_username = process.env.CALDAV_USERNAME;
+    if (process.env.CALDAV_PASSWORD) calendar.caldav_password = process.env.CALDAV_PASSWORD;
   }
 
   // Set defaults for llm config

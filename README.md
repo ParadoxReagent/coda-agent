@@ -1,17 +1,21 @@
 # coda - Personal AI Assistant Platform
 
-**Current Status: Phase 1 Foundation Complete**
+**Current Status: Phase 2 MVP Skills Complete**
 
-⚠️ **Important**: Only the core infrastructure is implemented. **No functional skills exist yet** (no email, calendar, Plex, etc.). The bot can chat using any LLM provider but cannot perform actions.
+coda is a personal AI assistant that lives in Discord and manages your digital life. It connects to your email, calendar, and notes — and can deliver a morning briefing with a single message.
 
 ## What Works Now
 
-- ✅ Multi-provider LLM support (Anthropic, Google Gemini, OpenAI, OpenRouter, Ollama)
-- ✅ Discord bot with natural language + slash commands
-- ✅ Conversation context tracking
-- ✅ Provider switching at runtime
-- ✅ Token usage tracking
-- ❌ **No skills implemented** - bot cannot do anything useful yet
+- Multi-provider LLM support (Anthropic, Google Gemini, OpenAI, OpenRouter, Ollama)
+- Discord bot with natural language + slash commands
+- Conversation context tracking
+- Provider switching at runtime
+- Token usage tracking
+- **Email** — IMAP polling, automatic categorization (urgent/needs response/informational/low priority), urgent email alerts
+- **Calendar** — CalDAV integration, view today/upcoming events, create events with conflict detection, search
+- **Reminders** — Natural language time parsing ("in 2 hours", "every Monday at 9am"), background due-reminder alerts, snooze
+- **Notes** — Full-text search, tagging, `context:always` notes injected into every conversation
+- **Morning Briefing** — Say "good morning" and get an email summary, today's schedule, and pending reminders in one response
 
 ## Quick Start (Development Mode)
 
@@ -21,6 +25,7 @@
 - pnpm (`npm install -g pnpm`)
 - At least one LLM API key (Anthropic, OpenAI, Google, or OpenRouter)
 - Discord bot token and server setup
+- PostgreSQL and Redis (required for skills; see Docker section below)
 
 ### 1. Install Dependencies
 
@@ -65,14 +70,34 @@ GOOGLE_API_KEY=AIza...
 # OR
 OPENROUTER_API_KEY=sk-or-...
 
-# Optional: Database (not needed for basic chat)
-# DATABASE_URL=postgresql://coda:coda@localhost:5432/coda
-# REDIS_URL=redis://localhost:6379
+# Required for skills: Database + Redis
+DATABASE_URL=postgresql://coda:coda@localhost:5432/coda
+REDIS_URL=redis://localhost:6379
+
+# Optional: Email (IMAP)
+IMAP_HOST=imap.gmail.com
+IMAP_USER=you@gmail.com
+IMAP_PASS=your_app_password
+
+# Optional: Calendar (CalDAV)
+CALDAV_SERVER_URL=https://caldav.example.com
+CALDAV_USERNAME=you@example.com
+CALDAV_PASSWORD=your_password
 ```
 
-### 4. Run in Development Mode
+### 4. Start Infrastructure
 
-**Without Docker (simplest for testing):**
+```bash
+docker-compose up -d postgres redis
+```
+
+### 5. Run Migrations
+
+```bash
+pnpm db:migrate
+```
+
+### 6. Run in Development Mode
 
 ```bash
 pnpm dev
@@ -80,42 +105,95 @@ pnpm dev
 
 The bot will start and connect to Discord. You'll see:
 ```
+Database initialized
+Redis connected
 coda agent is running
 Discord bot connected
 ```
 
-### 5. Test It
+### 7. Test It
 
 Go to your Discord channel and:
 
 ```
-You: Hello!
-Bot: Hi! I'm coda, your personal AI assistant. Right now I'm in Phase 1 - I can chat but I don't have any skills loaded yet.
+You: Good morning!
+Bot: Good morning! Here's your briefing:
 
-You: /status
-Bot: Skills loaded: 0
-     No skills loaded.
+📧 Email: 12 new emails (2 urgent from boss@company.com)
+📅 Calendar: 3 events today — Team standup at 9am, 1:1 with Jane at 2pm, Sprint review at 4pm
+⏰ Reminders: 2 pending — Call dentist (due 2pm), Submit report (due 5pm)
 
-You: /model list
-Bot: **Available Providers**
-     anthropic: claude-sonnet-4-5-20250514 (tools: true)
+You: Remind me to pick up groceries in 2 hours
+Bot: Reminder set: "pick up groceries" — in 2 hours (3:00 PM)
+
+You: Save a note: The WiFi password for the office is sunshine42
+Bot: Note saved: "The WiFi password for the office is sun..."
+
+You: Search my notes for WiFi
+Bot: Found 1 note: "The WiFi password for the office is sunshine42"
 ```
 
-## Current Limitations
+## Skills
 
-Since this is Phase 1 (foundation only), the bot:
+### Email
 
-- ✅ Can have conversations using any configured LLM
-- ✅ Remembers conversation history (in-memory, resets on restart)
-- ✅ Can switch between different LLM providers
-- ✅ Tracks token usage and estimated costs
-- ❌ **Cannot check email** (skill not implemented)
-- ❌ **Cannot control Plex** (skill not implemented)
-- ❌ **Cannot read calendar** (skill not implemented)
-- ❌ **Cannot monitor UniFi network** (skill not implemented)
-- ❌ **Cannot set reminders** (skill not implemented)
+Polls your IMAP mailbox and categorizes emails automatically. Urgent emails trigger alerts.
 
-**Phase 2** (coming next) will implement the first functional skills.
+| Tool | Description |
+|------|-------------|
+| `email_check` | Summary grouped by category (urgent, needs response, informational, low priority) |
+| `email_read` | Read a specific email by UID |
+| `email_search` | Filter by query, sender, or date |
+| `email_flag` | Add/remove IMAP flags (flagged, seen, answered) |
+
+Configure categorization rules in `config.yaml`:
+
+```yaml
+email:
+  categorization:
+    urgent_senders: ["boss@company.com", "cto@company.com"]
+    urgent_keywords: ["URGENT", "ACTION REQUIRED"]
+    known_contacts: ["friend@example.com"]
+```
+
+### Calendar
+
+Connects to any CalDAV server (iCloud, Fastmail, Nextcloud, etc.).
+
+| Tool | Description |
+|------|-------------|
+| `calendar_today` | Today's events |
+| `calendar_upcoming` | Next N days, grouped by date |
+| `calendar_create` | Create event (requires confirmation, checks for conflicts) |
+| `calendar_search` | Search by keyword + optional date range |
+
+### Reminders
+
+Natural language time parsing powered by chrono-node. Supports one-time and recurring reminders.
+
+| Tool | Description |
+|------|-------------|
+| `reminder_create` | "in 2 hours", "Friday at 3pm", "every Monday at 9am" |
+| `reminder_list` | View pending/completed/all reminders |
+| `reminder_complete` | Mark done (auto-creates next occurrence if recurring) |
+| `reminder_snooze` | Snooze with natural language ("in 15 minutes") |
+
+A background checker runs every 60 seconds and publishes `alert.reminder.due` events for overdue reminders.
+
+### Notes
+
+Full-text search with PostgreSQL tsvector. Tag notes for organization — use `context:always` to inject a note into every conversation.
+
+| Tool | Description |
+|------|-------------|
+| `note_save` | Save with optional title and tags |
+| `note_search` | Full-text search with optional tag filter |
+| `note_list` | Recent notes, optional tag filter |
+| `note_delete` | Delete by ID |
+
+### Morning Briefing
+
+Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available skills. Works gracefully when some skills are not configured.
 
 ## Architecture Overview
 
@@ -128,12 +206,25 @@ Since this is Phase 1 (foundation only), the bot:
 ┌─────────────────▼───────────────────────┐
 │          Orchestrator                    │
 │   (agent loop + tool calling)            │
-└─────────────────┬───────────────────────┘
-                  │
-┌─────────────────▼───────────────────────┐
-│       LLM Provider Manager               │
-│  (Anthropic, Google, OpenAI-compat)      │
-└──────────────────────────────────────────┘
+│   + briefing instructions                │
+│   + context:always notes injection       │
+└───┬─────────────┬───────────────────┬───┘
+    │             │                   │
+┌───▼───┐   ┌────▼────┐   ┌─────────▼──────┐
+│ Skills │   │   LLM   │   │  Context Store  │
+│Registry│   │Provider │   │  (history +     │
+│        │   │Manager  │   │   facts)        │
+└───┬────┘   └─────────┘   └────────────────┘
+    │
+┌───▼──────────────────────────────────┐
+│  Email │ Calendar │ Reminders │ Notes │
+│  IMAP  │  CalDAV  │ chrono-node│  DB  │
+└──────────────────────────────────────┘
+    │              │
+┌───▼───┐    ┌─────▼─────┐
+│ Redis │    │ PostgreSQL │
+│(cache) │    │ (persist)  │
+└────────┘    └────────────┘
 ```
 
 ## LLM Provider Configuration
@@ -192,16 +283,19 @@ Then use `/model set openrouter anthropic/claude-sonnet-4-5` to switch.
 ## Development Commands
 
 ```bash
-pnpm dev          # Run with hot reload
-pnpm build        # Compile TypeScript
-pnpm test         # Run test suite (85 tests)
-pnpm test:watch   # Run tests in watch mode
-pnpm lint         # Type check without building
+pnpm dev           # Run with hot reload
+pnpm build         # Compile TypeScript
+pnpm test          # Run full test suite (193 tests)
+pnpm test:unit     # Unit tests only
+pnpm test:integration  # Integration tests only
+pnpm test:phase2   # Phase 2 skill + integration tests
+pnpm test:watch    # Run tests in watch mode
+pnpm lint          # Type check without building
+pnpm db:generate   # Generate Drizzle migrations
+pnpm db:migrate    # Run database migrations
 ```
 
 ## Running with Docker (Full Stack)
-
-**Note**: This requires PostgreSQL and Redis, which aren't needed for basic chat functionality.
 
 ```bash
 # Copy secrets
@@ -216,31 +310,36 @@ docker-compose logs -f coda-core
 
 ## Project Status
 
-### ✅ Phase 1: Foundation (Complete)
-- LLM provider abstraction
-- Discord bot interface
-- Core orchestrator with tool calling
-- Conversation context
+### Phase 1: Foundation (Complete)
+- LLM provider abstraction (Anthropic, Google, OpenAI-compat)
+- Discord bot interface with slash commands
+- Core orchestrator with tool-calling loop
+- Conversation context (in-memory)
 - Confirmation flow for destructive actions
-- External skill SDK
-- 85 tests, all passing
+- Event bus + alert routing
+- External skill SDK with security hardening
+- 85 tests
 
-### 🚧 Phase 2: MVP Skills (Not Started)
-- Email skill (IMAP polling, categorization)
-- Calendar skill (CalDAV/Google Calendar)
-- Reminder skill
-- Notes/knowledge base skill
-- Morning briefing command
+### Phase 2: MVP Skills (Complete)
+- Email skill (IMAP polling, rules-based categorization, urgent alerts)
+- Calendar skill (CalDAV integration, conflict detection)
+- Reminders skill (natural language time parsing, recurring, background checker)
+- Notes skill (full-text search, tagging, context:always injection)
+- Morning briefing (orchestrated multi-skill summary)
+- Database singleton for internal skills
+- Real Redis-backed skill context
+- 108 new tests (193 total)
 
-### 📋 Phase 3-7: See phase-*.md files for roadmap
+### Phase 3-7: See phase plan files for roadmap
 
 ## Security Notes
 
 - The bot only responds in the designated Discord channel
 - Only users in `DISCORD_ALLOWED_USER_IDS` can interact with it
 - All external content (emails, API responses) is sanitized to prevent prompt injection
-- Destructive actions require confirmation tokens (Phase 2+)
+- Destructive actions (creating calendar events) require confirmation tokens
 - PII is automatically redacted from logs
+- External skills are sandboxed with integrity verification
 
 ## Troubleshooting
 
@@ -250,6 +349,12 @@ docker-compose logs -f coda-core
 2. Verify `DISCORD_CHANNEL_ID` matches your channel
 3. Verify `DISCORD_ALLOWED_USER_IDS` includes your Discord user ID
 4. Check Message Content Intent is enabled in Discord Developer Portal
+
+### Skills not loading
+
+1. Email and Calendar require external service config — check env vars or `config.yaml`
+2. Notes and Reminders always load (they only need PostgreSQL)
+3. Check logs for "Skill registered" or "missing required config" messages
 
 ### "No LLM providers available"
 
@@ -268,17 +373,11 @@ pnpm install
 pnpm run lint
 ```
 
-## Next Steps
-
-To make this bot actually useful, you need to implement Phase 2 skills. See `phase-2-mvp-skills.md` for the implementation plan.
-
-The skill framework is ready - you just need to create skill classes that implement the `Skill` interface in `src/skills/base.ts`.
-
 ## Documentation
 
 - [Architecture Overview](personal-assistant-architecture.md)
-- [Phase 1 Plan](phase-1-foundation.md) ← You are here
-- [Phase 2 Plan](phase-2-mvp-skills.md) ← Next to implement
+- [Phase 1 Plan](phase-1-foundation.md)
+- [Phase 2 Plan](phase-2-mvp-skills.md)
 - [Phase 3-7 Plans](phase-3-home-integration.md)
 
 ## License

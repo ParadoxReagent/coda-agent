@@ -208,3 +208,118 @@ export function createMockSkillContext(
     eventBus: createMockEventBus(),
   };
 }
+
+// ---- Mock IMAP Client ----
+export interface MockIMAPMessage {
+  uid: number;
+  envelope: {
+    from?: Array<{ name?: string; address?: string }>;
+    to?: Array<{ address?: string }>;
+    cc?: Array<{ address?: string }>;
+    subject?: string;
+    date?: Date;
+    messageId?: string;
+  };
+  flags: Set<string>;
+}
+
+export function createMockIMAPClient(messages: MockIMAPMessage[] = []) {
+  const releaseFn = vi.fn();
+
+  return {
+    connect: vi.fn().mockResolvedValue(undefined),
+    logout: vi.fn().mockResolvedValue(undefined),
+    getMailboxLock: vi.fn().mockResolvedValue({ release: releaseFn }),
+    messageFlagsAdd: vi.fn().mockResolvedValue(undefined),
+    messageFlagsRemove: vi.fn().mockResolvedValue(undefined),
+    fetch: vi.fn().mockReturnValue({
+      [Symbol.asyncIterator]() {
+        let i = 0;
+        return {
+          next() {
+            if (i < messages.length) {
+              return Promise.resolve({
+                value: messages[i++],
+                done: false,
+              });
+            }
+            return Promise.resolve({ value: undefined, done: true });
+          },
+        };
+      },
+    }),
+    _release: releaseFn,
+  };
+}
+
+// ---- Mock CalDAV Client ----
+export interface MockCalendarEvent {
+  id: string;
+  title: string;
+  startTime: Date;
+  endTime: Date;
+  location?: string;
+  description?: string;
+  attendees: string[];
+  allDay: boolean;
+}
+
+export function createMockCalDAVClient(events: MockCalendarEvent[] = []) {
+  return {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    getEvents: vi.fn().mockResolvedValue(events),
+    createEvent: vi.fn().mockResolvedValue(crypto.randomUUID()),
+    searchEvents: vi.fn().mockImplementation(
+      (query: string) =>
+        events.filter(
+          (e) =>
+            e.title.toLowerCase().includes(query.toLowerCase()) ||
+            e.description?.toLowerCase().includes(query.toLowerCase())
+        )
+    ),
+  };
+}
+
+// ---- Mock Database (chainable query builder) ----
+export function createMockDatabase() {
+  const results: unknown[] = [];
+  let pendingResults: unknown[] = [];
+
+  const chain = {
+    _setResults(data: unknown[]) {
+      pendingResults = data;
+    },
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockImplementation(() => ({
+      orderBy: vi.fn().mockImplementation(() => ({
+        limit: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+      })),
+      limit: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+      returning: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+    })),
+    orderBy: vi.fn().mockImplementation(() => ({
+      limit: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+    })),
+    insert: vi.fn().mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        returning: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+      }),
+    }),
+    update: vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+        }),
+      }),
+    }),
+    delete: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockImplementation(() => Promise.resolve(pendingResults)),
+      }),
+    }),
+  };
+
+  return chain;
+}

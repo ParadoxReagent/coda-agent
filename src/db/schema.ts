@@ -7,7 +7,16 @@ import {
   serial,
   varchar,
   index,
+  uuid,
+  customType,
 } from "drizzle-orm/pg-core";
+
+/** Custom tsvector type for PostgreSQL full-text search. */
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 /** Conversation history for medium/long-term storage. */
 export const conversations = pgTable(
@@ -69,5 +78,49 @@ export const llmUsage = pgTable(
   (table) => [
     index("usage_provider_model_idx").on(table.provider, table.model),
     index("usage_created_at_idx").on(table.createdAt),
+  ]
+);
+
+/** Reminders for the user. */
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    title: varchar("title", { length: 500 }).notNull(),
+    description: text("description"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    recurring: varchar("recurring", { length: 100 }),
+    status: varchar("status", { length: 20 }).default("pending").notNull(),
+    channel: varchar("channel", { length: 50 }),
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("reminders_user_status_due_idx").on(
+      table.userId,
+      table.status,
+      table.dueAt
+    ),
+  ]
+);
+
+/** User notes with full-text search support. */
+export const notes = pgTable(
+  "notes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    title: varchar("title", { length: 500 }),
+    content: text("content").notNull(),
+    tags: text("tags").array().default([]).notNull(),
+    searchVector: tsvector("search_vector"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("notes_user_idx").on(table.userId),
+    index("notes_tags_idx").on(table.tags),
   ]
 );

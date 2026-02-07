@@ -27,4 +27,13 @@ export const RETENTION = {
 
   /** Max conversation messages per user in Redis */
   MAX_CONVERSATION_MESSAGES: 50,
+
+  /** Reminder check interval in seconds (1 minute) */
+  REMINDER_CHECK_INTERVAL: 60,
+
+  /** Morning briefing cache TTL in seconds (1 hour) */
+  BRIEFING_CACHE: 3600,
+
+  /** Calendar event cache TTL in seconds (15 minutes) */
+  CALENDAR_CACHE: 900,
 } as const;
