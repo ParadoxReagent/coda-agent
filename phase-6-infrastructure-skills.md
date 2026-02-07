@@ -56,7 +56,7 @@
   - Output: detailed VM info — config, resource usage, snapshots, network
 - [ ] Tool: `proxmox_vm_action`
   - Input: `vmid` (number), `action` ("start", "stop", "restart", "shutdown")
-  - **Destructive action — requires explicit confirmation for stop/restart**
+  - **Destructive action — requires explicit confirmation for stop/restart/shutdown**
   - Output: confirmation of action
 
 ### Proactive Alerts
@@ -129,7 +129,10 @@
 
 ## 6.5 Test Suite — Phase 6 Gate
 
-All tests must pass before proceeding to Phase 7. Run with `npm run test:phase6`.
+Gate-tier tests must pass before proceeding to Phase 7. Run with `npm run test:phase6`.
+- Gate: deterministic unit + integration tests (no live network dependency)
+- Advisory: live-provider contract checks (non-blocking)
+- Nightly: full end-to-end against real external services
 
 ### Unit Tests
 
@@ -148,7 +151,7 @@ All tests must pass before proceeding to Phase 7. Run with `npm run test:phase6`
 - [ ] `proxmox_vms` returns VM list filtered by status
 - [ ] `proxmox_vm_detail` returns detailed info for valid VMID
 - [ ] `proxmox_vm_detail` returns error for invalid VMID
-- [ ] `proxmox_vm_action` requires confirmation for stop/restart actions
+- [ ] `proxmox_vm_action` requires confirmation for stop/restart/shutdown actions
 - [ ] `proxmox_vm_action` executes start without confirmation
 - [ ] Handles Proxmox API unreachable gracefully
 

@@ -304,13 +304,16 @@ Google Gemini's OpenAI compatibility endpoint has known gaps in tool calling (`t
     CONVERSATION_HISTORY: 24 * 60 * 60,       // 24h in Redis
     CONVERSATION_SUMMARY: 30 * 24 * 60 * 60,  // 30 days
     EMAIL_CACHE: 24 * 60 * 60,                // 24h in Redis
-    CONTEXT_FACTS: null,                       // permanent (Postgres)
+    CONTEXT_FACTS: 365 * 24 * 60 * 60,        // default 1 year (configurable)
     LLM_USAGE: 90 * 24 * 60 * 60,            // 90 days in Postgres
     ALERT_COOLDOWN: 5 * 60,                   // 5 min in Redis
     CONFIRMATION_TOKEN: 5 * 60,               // 5 min in Redis
   } as const;
   ```
 - [ ] All Redis `SET`/`EXPIRE` calls and Postgres cleanup jobs reference these constants
+- [ ] User privacy controls:
+  - Export and delete endpoints/commands for `context_facts`
+  - Retention override per fact category (short-lived vs persistent) with explicit opt-in for permanent storage
 - [ ] Prevents magic numbers scattered across skills and makes retention auditable
 
 ---
@@ -373,11 +376,11 @@ Google Gemini's OpenAI compatibility endpoint has known gaps in tool calling (`t
 
 ### Context Management (`src/core/context.ts`)
 - [ ] Implement `ContextStore` class backed by Redis + Postgres:
-  - `getHistory(userId, channel)` — retrieve last N messages (Redis, 24h TTL)
-  - `save(userId, channel, userMsg, assistantMsg)` — append to history
+  - `getHistory(userId, channel?)` — retrieve last N messages (Redis, 24h TTL), optionally filtered to one channel
+  - `save(userId, channel, userMsg, assistantMsg)` — append to shared user history with channel metadata
   - `getFacts(userId)` — retrieve long-term facts from Postgres
   - `saveFact(userId, key, value)` — persist a long-term fact
-- [ ] Short-term: last 50 messages per user/channel in Redis (24h TTL)
+- [ ] Short-term: last 50 messages per user (cross-channel) in Redis (24h TTL), each record tagged with source channel
 - [ ] Medium-term: daily conversation summaries (30-day TTL) — stub for now
 - [ ] Long-term: key facts in Postgres `context_facts` table
 
@@ -448,12 +451,23 @@ External skills must include a manifest file in their package root.
       "config": ["my_skill.api_key"],
       "services": ["redis"]
     },
+    "integrity": {
+      "sha256": "base64-encoded-hash-of-entry"
+    },
+    "publisher": {
+      "id": "local-user-or-team",
+      "signature": "optional-signature"
+    },
+    "runsInWorker": false,
     "coda_sdk_version": "^1.0.0"
   }
   ```
 - [ ] `entry` — path to the JS module that default-exports a `Skill` class
 - [ ] `requires.config` — config keys the skill needs (validated before startup)
 - [ ] `requires.services` — which core services the skill needs (`redis`, `postgres`, `eventBus`, `scheduler`)
+- [ ] `integrity.sha256` — required for external skills; loader verifies `entry` hash before import
+- [ ] `publisher` — optional signing metadata for trusted-source verification
+- [ ] `runsInWorker` — optional boolean; if `true`, skill is eligible for worker-process execution (Phase 5)
 - [ ] `coda_sdk_version` — semver range for SDK compatibility checking
 
 ### Skill Registry (`src/skills/registry.ts`)
@@ -471,7 +485,11 @@ External skills must include a manifest file in their package root.
       - "./custom-skills"        # relative to project root
   ```
   - Each subdirectory must contain a `coda-skill.json` manifest
+  - Directory and file-permission checks on manifests/entries (not world-writable)
   - Load via dynamic `import()` of the manifest's `entry` path
+  - Resolve `entry` to a canonical path and reject path traversal/symlink escape outside the skill directory
+  - Verify `integrity.sha256` before import; reject on mismatch
+  - Optional trusted-publisher policy: allowlist `publisher.id` or signature key IDs
   - Validate manifest schema and SDK version compatibility before loading
 - [ ] Skill load failures are logged at ERROR but do not prevent other skills from loading
 
@@ -487,8 +505,8 @@ External skills must include a manifest file in their package root.
 - [ ] For tools with `requiresConfirmation: true`:
   1. Skill executor intercepts the tool call before execution
   2. Returns a preview response to the orchestrator: action description + unique confirmation token
-  3. Token is a short hash (e.g., `a3f2`) stored in Redis with a 5-minute TTL (`RETENTION.CONFIRMATION_TOKEN`)
-  4. User sees: *"I'll create this calendar event: 'Team standup, Mon 10am'. Reply `confirm a3f2` to proceed."*
+  3. Token is a cryptographically random token (minimum 80 bits entropy; e.g., 16+ base32 chars) stored in Redis with a 5-minute TTL (`RETENTION.CONFIRMATION_TOKEN`)
+  4. User sees: *"I'll create this calendar event: 'Team standup, Mon 10am'. Reply `confirm <token>` to proceed."*
   5. User replies with `confirm <token>` → orchestrator validates token, executes the tool
   6. Token is single-use: deleted from Redis immediately after use or expiry
   7. Invalid/expired tokens return a clear error message
@@ -757,6 +775,7 @@ Tests are classified into tiers to prevent external flakiness from blocking deve
 
 **Confirmation Flow (`tests/unit/core/confirmation.test.ts`)**
 - [ ] Generates unique confirmation token for a pending action
+- [ ] Token format enforces high entropy (minimum 80-bit random token; no short/static codes)
 - [ ] Token is stored in Redis with correct TTL (5 minutes)
 - [ ] Valid token executes the pending action and deletes the token
 - [ ] Expired token returns a clear error message
@@ -779,6 +798,9 @@ Tests are classified into tiers to prevent external flakiness from blocking deve
 - [ ] Scans configured external directories for `coda-skill.json` manifests
 - [ ] Validates manifest schema (rejects invalid manifests with clear error)
 - [ ] Checks `coda_sdk_version` compatibility (rejects incompatible versions)
+- [ ] Verifies `integrity.sha256` of manifest `entry` before import
+- [ ] Rejects entry path traversal/symlink escape outside the skill directory
+- [ ] Rejects skills from insecure file permissions (world-writable manifests/entries)
 - [ ] Loads skill module via dynamic `import()` from manifest `entry` path
 - [ ] Validates loaded module default-exports a class implementing `Skill`
 - [ ] Handles missing `coda-skill.json` gracefully (skip directory, log warning)

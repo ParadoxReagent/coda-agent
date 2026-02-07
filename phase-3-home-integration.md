@@ -25,6 +25,10 @@ Phase 1 introduced a thin in-process `EventBus` interface with `publish()` and `
   }
   ```
 - [ ] Consumer groups for reliable delivery (events aren't lost on restart)
+- [ ] Delivery semantics: at-least-once (not exactly-once)
+  - Every event includes an `eventId` (UUIDv7 or ULID)
+  - Consumers use idempotency keys (`eventId + handlerName`) in Redis/Postgres TTL store
+  - Duplicate deliveries are acknowledged and skipped safely
 - [ ] Dead letter handling for events that fail processing 3 times
 
 ### Alert Router (`src/core/alerts.ts`)
@@ -115,8 +119,8 @@ The event bus handles reactive events, but coda also needs to run actions on a s
   - Configurable in `config.yaml` under `scheduler.tasks`
 - [ ] Built-in scheduled tasks:
   - `briefing.prepare` — pre-fetch and cache morning briefing data (default: 6:00 AM)
-  - `email.poll` — trigger email polling (backup to the interval-based poller)
-  - `reminders.check` — check for due reminders (every 60s, default from Phase 2)
+  - `email.poll` — trigger email polling (becomes the single owner; disable Phase 2 interval poller when enabled)
+  - `reminders.check` — check for due reminders (becomes the single owner; disable Phase 2 interval checker when enabled)
   - `health.check` — run internal health checks and log status (every 5 min)
 - [ ] Skills can register their own scheduled tasks at startup:
   - UniFi: `unifi.poll` — client/device polling (every 60s)
@@ -211,7 +215,10 @@ scheduler:
 
 ## 3.7 Test Suite — Phase 3 Gate
 
-All tests must pass before proceeding to Phase 4. Run with `npm run test:phase3`.
+Gate-tier tests must pass before proceeding to Phase 4. Run with `npm run test:phase3`.
+- Gate: deterministic unit + integration tests (no live network dependency)
+- Advisory: live-provider contract checks (non-blocking)
+- Nightly: full end-to-end against real external services
 
 ### Unit Tests
 
@@ -219,7 +226,8 @@ All tests must pass before proceeding to Phase 4. Run with `npm run test:phase3`
 - [ ] `publish()` writes event to Redis Stream with correct format
 - [ ] `subscribe()` registers handler and receives matching events
 - [ ] Events are delivered to the correct handler based on pattern matching
-- [ ] Consumer groups ensure events are processed exactly once
+- [ ] Consumer groups provide at-least-once delivery; duplicate deliveries are possible
+- [ ] Idempotency keys prevent duplicate side effects for repeated event delivery
 - [ ] Dead letter queue captures events that fail processing 3 times
 - [ ] Event bus handles Redis disconnection gracefully
 

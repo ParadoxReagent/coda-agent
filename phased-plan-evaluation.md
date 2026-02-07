@@ -114,9 +114,19 @@ The following recommendations have been incorporated into the phase docs:
 | 3 | Security baseline pulled forward | Phase 1 §1.3 — log redaction, retention TTLs, confirmation flow | Done |
 | 4 | Provider capability matrix | Phase 1 §1.2 — 3 adapters, capabilities config, Google SDK | Done |
 | 5 | Confirmation UX with action hashes | Phase 1 §1.5 — confirmation tokens, single-use, 5min TTL | Done |
-| 6 | Tiered test gates | Phase 1 §1.9 — gate/advisory/nightly tiers | Done |
+| 6 | Tiered test gates | Phases 1-7 test-gate sections — gate/advisory/nightly tiers | Done |
 | 7 | Service boundaries for Phase 5+ | Phase 5 §5.6 — worker process architecture | Done |
 
 Additionally applied:
 - **External skill SDK** — Phase 1 §1.5 (SkillContext, manifest, external loading), Phase 4 §4.4 (hardening), Phase 4 §4.8 (SKILL-SDK.md docs)
 - **Worker processes** — Phase 5 §5.6 (runsInWorker flag, resource limits, circuit breakers)
+
+Post-review amendments:
+- **Event delivery semantics** — Phase 3 §3.1 and tests now define secure at-least-once delivery with idempotency keys (not exactly-once)
+- **DND policy** — Phase 4 now states security + system alerts bypass DND
+- **Proxmox safety** — Phase 6 now requires confirmation for `shutdown` as well as `stop/restart`
+- **REST trust boundary** — Phase 7 now requires trusted-source verification for Tailscale identity headers
+- **External skill supply chain controls** — Phase 1 + Phase 4 now require integrity checks, trusted-source policy options, and safer loader path/permission validation
+- **Pairing/JWT hardening** — Phase 7 now defines pairing TTL/attempt limits/device proof, JWT claim validation, key rotation, and refresh-token revocation controls
+- **Privacy/retention controls** — Phase 1 now sets default `context_facts` retention (configurable) and explicit export/delete controls
+- **Alert data minimization** — Phase 2 urgent email alerts now default to metadata-only payloads with snippet opt-in

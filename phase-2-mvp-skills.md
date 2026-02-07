@@ -17,6 +17,9 @@
   - Track last-seen UID to avoid reprocessing
 - [ ] Support multiple IMAP folders (configurable)
 - [ ] Connection resilience: retry with exponential backoff on IMAP disconnects
+- [ ] Poller ownership rule:
+  - Phase 2: this interval poller is the single active owner
+  - Phase 3+: when `scheduler.tasks.email_poll` is enabled, disable local interval polling to avoid duplicate runs
 
 ### Email Categorizer (`src/skills/email/categorizer.ts`)
 - [ ] Categorize emails into buckets:
@@ -46,7 +49,8 @@
 
 ### Proactive Email Alerts
 - [ ] Publish `alert.email.urgent` event via `eventBus.publish()` when urgent emails arrive during polling
-- [ ] Include sender, subject, and snippet in the event payload
+- [ ] Default payload is minimized: sender + subject + message UID (no body snippet)
+- [ ] Optional `includeSnippetInAlerts` config (default `false`) enables a sanitized/truncated snippet for trusted channels only
 - [ ] Phase 1's in-process `EventBus` routes events to a simple Discord DM handler
 - [ ] Phase 3 replaces the backend with Redis Streams — no changes needed in email skill code
 
@@ -54,6 +58,7 @@
 - [ ] IMAP credentials stored in encrypted config only
 - [ ] All email content passed through `ContentSanitizer.sanitizeEmail()` before LLM sees it
 - [ ] OAuth2 refresh token rotation for Gmail/O365
+- [ ] Alert payload redaction policy enforced so sensitive email content is not broadcast by default
 
 ---
 
@@ -116,6 +121,9 @@
 - [ ] Publish `alert.reminder.due` event via `eventBus.publish()` when a reminder crosses its due time
 - [ ] For recurring reminders, auto-create next occurrence on completion
 - [ ] Snooze: update `snoozedUntil`, suppress alerts until then
+- [ ] Checker ownership rule:
+  - Phase 2: interval checker is active
+  - Phase 3+: scheduler-owned `reminders.check` becomes the only active checker
 
 ### Natural Language Time Parsing
 - [ ] Use `chrono-node` for natural language date/time parsing:
@@ -191,7 +199,10 @@
 
 ## 2.7 Test Suite — Phase 2 Gate
 
-All tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`.
+Gate-tier tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`.
+- Gate: deterministic unit + integration tests (no live network dependency)
+- Advisory: live-provider contract checks (non-blocking)
+- Nightly: full end-to-end against real external services
 
 ### Unit Tests
 
@@ -267,7 +278,8 @@ All tests must pass before proceeding to Phase 3. Run with `npm run test:phase2`
 
 **Email Alert Pipeline (`tests/integration/email-alerts.test.ts`)**
 - [ ] Urgent email during polling publishes `alert.email.urgent` event
-- [ ] Alert payload contains sender, subject, and snippet
+- [ ] Default alert payload contains sender + subject + UID (no snippet/body content)
+- [ ] Optional snippet mode emits sanitized/truncated snippet only when explicitly enabled
 - [ ] Non-urgent emails do not trigger alerts
 
 **Notes Context Integration (`tests/integration/notes-context.test.ts`)**

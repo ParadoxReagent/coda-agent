@@ -19,13 +19,24 @@
 
 ### Authentication & Security
 - [ ] **Tailscale-only exposure** — REST API binds to Tailscale interface, never public internet
-- [ ] Authenticate via Tailscale identity headers (`Tailscale-User-Login`, `Tailscale-User-Name`)
+- [ ] Authenticate via Tailscale identity headers (`Tailscale-User-Login`, `Tailscale-User-Name`) only when injected by a trusted local component (`tsnet` / Tailscale Serve)
+  - Reject direct client-supplied identity headers unless request source is verified trusted
+  - Strip and ignore forwarding identity headers at edge boundaries by default
 - [ ] Fallback: JWT tokens issued via a one-time pairing flow:
-  1. Generate pairing code shown on server logs/Discord
-  2. Enter code in iOS app → receive JWT
-  3. JWT includes userId, expires in 30 days, refresh token for rotation
+  1. Generate pairing code shown only in trusted operator channels
+  2. Pairing code is short-lived (default 5 minutes), single-use, and attempt-limited
+  3. Enter code in iOS app with device proof (ephemeral public key / nonce) → receive JWT
+  4. JWT includes userId and deviceId, expires in 30 days, refresh token for rotation
+  5. Refresh token is stored server-side as a hash and can be revoked
 - [ ] All endpoints require authentication
 - [ ] Rate limiting per client (token bucket in Redis)
+- [ ] JWT validation hardening:
+  - Validate `iss`, `aud`, `exp`, `nbf`, and `iat` with bounded clock skew
+  - Sign with rotating keys (`kid`) and maintain key rollover policy
+  - Reject algorithm confusion (`alg`) and unsigned tokens
+- [ ] WebSocket auth hardening:
+  - Require auth at connection establishment and revalidate token on reconnect
+  - Enforce Origin allowlist for browser-based clients
 
 ### iOS App (Native Swift)
 - [ ] SwiftUI-based chat interface:
@@ -150,7 +161,8 @@ Expand beyond reactive Q&A to autonomous background research. coda periodically 
 - [ ] All autonomous tasks are explicitly configured (no surprise actions)
 - [ ] Read-only: autonomous tasks can gather and report but never take actions
 - [ ] Resource budget: max LLM tokens per day for autonomous tasks (separate from interactive)
-- [ ] Results queued for next briefing or interactive session, not pushed as alerts
+- [ ] Results queued for next briefing or interactive session, not pushed as alerts by default
+- [ ] Exception: high-severity security findings (e.g., matching critical CVEs) may emit immediate security alerts
 
 ---
 
@@ -206,7 +218,10 @@ The provider abstraction from Phase 1 already supports Ollama as a first-class p
 
 ## 7.6 Test Suite — Phase 7 Gate
 
-All tests must pass. Run with `npm run test:phase7`.
+Gate-tier tests must pass. Run with `npm run test:phase7`.
+- Gate: deterministic unit + integration tests (no live network dependency)
+- Advisory: live-provider contract checks (non-blocking)
+- Nightly: full end-to-end against real external services
 
 ### Unit Tests
 
@@ -224,10 +239,18 @@ All tests must pass. Run with `npm run test:phase7`.
 **JWT Auth (`tests/unit/interfaces/auth.test.ts`)**
 - [ ] Pairing code generation produces unique codes
 - [ ] Valid pairing code exchanges for JWT + refresh token
+- [ ] Pairing code expires after TTL and cannot be reused
+- [ ] Pairing flow enforces attempt limits and lockout on repeated failures
+- [ ] Pairing exchange requires valid device proof
 - [ ] JWT contains correct user claims and expiry
+- [ ] JWT includes `iss`/`aud` and rejects invalid issuer/audience
+- [ ] JWT with invalid `alg` or missing signature is rejected
+- [ ] JWT key rotation (`kid`) validates old/new keys during rollout
 - [ ] Refresh token rotates JWT successfully
+- [ ] Refresh tokens are stored hashed and revoked tokens are rejected
 - [ ] Used pairing codes are invalidated
-- [ ] Tailscale identity headers bypass JWT requirement
+- [ ] Tailscale identity headers bypass JWT only for trusted local source paths
+- [ ] Client-supplied spoofed identity headers are rejected
 
 **Voice Pipeline (`tests/unit/core/voice.test.ts`)**
 - [ ] Audio buffer is transcribed to text via Whisper

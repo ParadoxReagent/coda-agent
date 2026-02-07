@@ -106,6 +106,10 @@
   - Input schemas must be valid JSON Schema
   - Reject skills with invalid tool definitions at load time
 - [ ] Validate that external skills don't declare tools with names already registered by internal skills
+- [ ] Enforce external skill trust policy:
+  - Require integrity hash verification (`integrity.sha256`) before load
+  - Optional publisher allowlist/signature verification for production
+  - Reject skills from writable-by-others locations
 - [ ] Log all external skill load attempts (success and failure) at INFO level
 
 ### Skill Isolation
@@ -113,6 +117,7 @@
   - Uncaught exceptions are caught and logged, not propagated to orchestrator
   - Skill marked as `degraded` after N consecutive execution failures (configurable)
   - Skill automatically re-enabled after cooldown period
+- [ ] External skills run out-of-process by default (`child_process.fork()` worker mode) unless explicitly allowlisted for in-process execution
 - [ ] Per-skill resource limits:
   - Execution timeout (default: 30s, configurable per skill in manifest)
   - Per-skill rate limiting (default: 60 tool calls per hour)
@@ -136,6 +141,9 @@
 - [ ] Calendar create: max 20 per hour
 - [ ] Email operations: max 60 per hour
 - [ ] Rate limit tracking in Redis with sliding window
+- [ ] Confirmation abuse controls:
+  - `confirm <token>` attempts rate-limited per user (e.g., 10 per 5 minutes)
+  - Repeated invalid confirmation attempts generate `alert.system.abuse`
 
 ### API Cost Awareness
 - [ ] Leverage Phase 1 `LLM Usage Tracking` — token counts and cost estimates per provider/model
@@ -169,7 +177,8 @@
 ## 4.7 User Preference System
 
 ### Modes & Commands
-- [ ] `/dnd` — Do Not Disturb: suppress all alerts except system errors
+- [ ] `/dnd` — Do Not Disturb: suppress non-security/non-system alerts
+- [ ] Security and system alerts always bypass DND (e.g., `alert.unifi.*`, `alert.ha.smoke`, `alert.nas.raid_degraded`, `alert.system.*`)
 - [ ] `/alerts only` — Only receive proactive alerts, no briefing prompts
 - [ ] `/briefing` — Trigger full briefing on demand
 - [ ] `/quiet [start] [end]` — Set quiet hours (e.g., `/quiet 11pm 7am`)
@@ -211,7 +220,10 @@
 
 ## 4.9 Test Suite — Phase 4 Gate
 
-All tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`.
+Gate-tier tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`.
+- Gate: deterministic unit + integration tests (no live network dependency)
+- Advisory: live-provider contract checks (non-blocking)
+- Nightly: full end-to-end against real external services
 
 ### Unit Tests
 
@@ -244,9 +256,12 @@ All tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`
 **External Skill Hardening (`tests/unit/skills/skill-hardening.test.ts`)**
 - [ ] Skill with duplicate tool name (colliding with internal skill) is rejected
 - [ ] Skill with invalid tool input schema is rejected at load time
+- [ ] Skill with invalid integrity hash is rejected at load time
+- [ ] Skill from disallowed publisher/source is rejected when trusted-publisher policy is enabled
 - [ ] Skill execution crash is caught and does not propagate to orchestrator
 - [ ] Skill marked as `degraded` after N consecutive execution failures
 - [ ] Degraded skill is re-enabled after cooldown
+- [ ] External skills default to out-of-process execution unless explicitly allowlisted
 - [ ] Per-skill rate limit enforced independently of other skills
 - [ ] Skill Redis key access is namespaced (cannot read keys outside its prefix)
 
@@ -256,6 +271,7 @@ All tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`
 - [ ] Rate limit returns user-friendly message, not error
 - [ ] Rate limit state resets after window expires
 - [ ] Different skills have independent rate limits
+- [ ] `confirm <token>` attempts are rate-limited and repeated invalid attempts trigger `alert.system.abuse`
 
 **Slack Bot (`tests/unit/interfaces/slack-bot.test.ts`)**
 - [ ] Bot ignores messages from non-allowed users
@@ -301,7 +317,7 @@ All tests must pass before proceeding to Phase 5. Run with `npm run test:phase4`
 2. If the primary LLM provider is down, the system fails over to the next configured provider (or queues messages and responds with a friendly error if all are down)
 3. If the email IMAP server is unreachable, the briefing still works with calendar and reminders
 4. Structured JSON logs capture the full lifecycle of every request
-5. `/dnd` suppresses all non-system alerts; `/briefing` still works on-demand
+5. `/dnd` suppresses non-security/non-system alerts; security and system alerts bypass DND; `/briefing` still works on-demand
 6. Slack bot receives messages, processes them through the orchestrator, and formats responses with Block Kit
 7. Alerts can route to Discord, Slack, or both based on configuration
 8. Daily token usage is logged and optionally alerts above threshold

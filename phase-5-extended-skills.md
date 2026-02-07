@@ -119,7 +119,7 @@
 ## 5.4 Browser Automation Skill
 
 ### Why TypeScript Makes This Natural
-This is where the TypeScript stack choice pays off. Playwright is a first-class Node.js library — no bindings, no shims, no subprocess coordination. Browser automation runs in the same runtime as the rest of coda.
+This is where the TypeScript stack choice pays off. Playwright is a first-class Node.js library — no bindings or shims. It can run in a dedicated Node worker process while staying in the same TypeScript/JS ecosystem as the rest of coda.
 
 ### Integration Approach
 - [ ] Use Playwright (`playwright`) for headless browser automation
@@ -207,12 +207,13 @@ Phase 5 skills (browser automation, HA WebSocket event stream, 3D print adaptive
   - Long-lived connections (HA WebSocket, OctoPrint polling)
   - Heavy resource usage (Playwright browser instances)
   - Skills declare `runsInWorker: true` in their manifest
-- [ ] Worker skills run in separate Node.js child processes via `worker_threads` or `child_process.fork()`:
+- [ ] Worker skills run in separate Node.js child processes via `child_process.fork()`:
   - Communicate with the orchestrator via a message channel
   - Tool calls are dispatched to the worker process, results returned to orchestrator
   - Worker crash does not take down the orchestrator
+  - `worker_threads` are not used for isolation-critical skills (shared-process model is weaker for fault/resource isolation)
 - [ ] Per-skill resource limits:
-  - Memory ceiling per worker (configurable, e.g., 512MB for browser skill)
+  - Memory ceiling per worker (configurable, e.g., 512MB for browser skill) enforced with process-level controls (`execArgv --max-old-space-size`) plus container/cgroup limits
   - Concurrency limit per skill (e.g., max 3 concurrent browser operations)
   - Circuit breaker: if worker crashes repeatedly, disable skill and alert
 - [ ] Skills that don't declare `runsInWorker` continue to run in-process (no change for simple skills)
@@ -228,7 +229,10 @@ Phase 5 skills (browser automation, HA WebSocket event stream, 3D print adaptive
 
 ## 5.8 Test Suite — Phase 5 Gate
 
-All tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`.
+Gate-tier tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`.
+- Gate: deterministic unit + integration tests (no live network dependency)
+- Advisory: live-provider contract checks (non-blocking)
+- Nightly: full end-to-end against real external services
 
 ### Unit Tests
 
@@ -287,10 +291,11 @@ All tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`
 
 **Worker Process (`tests/unit/core/worker.test.ts`)**
 - [ ] Skill with `runsInWorker: true` is launched in a separate process
+- [ ] Isolation-critical skills use `child_process.fork()` (not `worker_threads`)
 - [ ] Tool calls are dispatched to worker and results returned to orchestrator
 - [ ] Worker crash does not affect orchestrator
 - [ ] Worker crash triggers circuit breaker after repeated failures
-- [ ] Memory ceiling is enforced per worker
+- [ ] Memory ceiling is enforced per worker via configured process/container limits
 - [ ] Concurrency limit prevents exceeding max parallel operations
 
 ### Integration Tests
@@ -352,6 +357,7 @@ All tests must pass before proceeding to Phase 6. Run with `npm run test:phase5`
 | Print API | OctoPrint primary, Moonraker secondary | OctoPrint is more common, Moonraker for Klipper |
 | Polling strategy | Adaptive (active vs idle) | Balance responsiveness with resource usage |
 | Browser engine | Playwright (Chromium) | First-class Node.js, same runtime, best automation API |
+| Worker isolation model | `child_process.fork()` for worker skills | Process boundary gives stronger crash and memory isolation than `worker_threads` |
 | Browser security | URL allowlist + confirmation for forms | Prevent unintended navigation/submissions |
 | Web search engine | SearXNG (self-hosted) primary, Tavily fallback | Privacy-first, no API key for SearXNG, Tavily for quality |
 
