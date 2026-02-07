@@ -114,3 +114,45 @@ skills:
     allow_unsigned_local: false
     allowed_local_unsigned_dirs:
       - "./custom-skills"
+
+# Alerts configuration
+# alerts:
+#   rules:
+#     "alert.email.urgent":
+#       severity: "high"
+#       channels: ["discord"]
+#       quietHours: true
+#       cooldown: 300
+#     "alert.reminder.due":
+#       severity: "medium"
+#       channels: ["discord"]
+#       quietHours: true
+#       cooldown: 60
+#     "alert.unifi.new_client":
+#       severity: "medium"
+#       channels: ["discord"]
+#       quietHours: true
+#       cooldown: 0
+#     "alert.unifi.bandwidth_spike":
+#       severity: "low"
+#       channels: ["discord"]
+#       quietHours: true
+#       cooldown: 900
+#     "alert.unifi.device_offline":
+#       severity: "high"
+#       channels: ["discord"]
+#       quietHours: true
+#       cooldown: 600
+#   quiet_hours:
+#     enabled: false
+#     start: "22:00"
+#     end: "07:00"
+#     timezone: "America/New_York"
+#     override_severities: ["high"]
+
+# Scheduler configuration (override built-in task schedules)
+# scheduler:
+#   tasks:
+#     "health.check":
+#       cron: "*/5 * * * *"
+#       enabled: true

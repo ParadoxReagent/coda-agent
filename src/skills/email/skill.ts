@@ -193,8 +193,21 @@ export class EmailSkill implements Skill {
         this.logger
       );
 
-      this.poller.start();
-      this.logger.info("Email skill started (Gmail API with OAuth2)");
+      if (ctx.scheduler) {
+        const pollerRef = this.poller;
+        ctx.scheduler.registerTask({
+          name: "poll",
+          cronExpression: `*/${Math.max(1, Math.round(pollInterval / 60))} * * * *`,
+          handler: async () => {
+            await pollerRef.poll();
+          },
+          description: "Poll Gmail for new emails",
+        });
+        this.logger.info("Email skill started (Gmail API with OAuth2, scheduler-managed)");
+      } else {
+        this.poller.start();
+        this.logger.info("Email skill started (Gmail API with OAuth2)");
+      }
     } else {
       // Legacy IMAP path
 
@@ -232,8 +245,21 @@ export class EmailSkill implements Skill {
         this.logger
       );
 
-      this.poller.start();
-      this.logger.info("Email skill started (legacy IMAP)");
+      if (ctx.scheduler) {
+        const pollerRef = this.poller;
+        ctx.scheduler.registerTask({
+          name: "poll",
+          cronExpression: `*/${Math.max(1, Math.round(pollInterval / 60))} * * * *`,
+          handler: async () => {
+            await pollerRef.poll();
+          },
+          description: "Poll IMAP for new emails",
+        });
+        this.logger.info("Email skill started (legacy IMAP, scheduler-managed)");
+      } else {
+        this.poller.start();
+        this.logger.info("Email skill started (legacy IMAP)");
+      }
     }
   }
 

@@ -17,6 +17,23 @@ export interface SkillRedisClient {
 }
 
 /**
+ * Client interface for registering scheduled tasks from a skill.
+ * Task names are auto-prefixed with the skill name (e.g., "poll" → "email.poll").
+ */
+export interface TaskSchedulerClient {
+  registerTask(task: ScheduledTaskDef): void;
+  removeTask(taskName: string): void;
+}
+
+export interface ScheduledTaskDef {
+  name: string;
+  cronExpression: string;
+  handler: () => Promise<void>;
+  enabled?: boolean;
+  description?: string;
+}
+
+/**
  * Context injected into every skill at startup.
  * This is the stable API through which skills access coda services.
  */
@@ -35,4 +52,7 @@ export interface SkillContext {
 
   /** Database access for persistent storage (e.g. OAuth tokens). */
   db: Database;
+
+  /** Optional scheduler client for registering cron-based tasks. */
+  scheduler?: TaskSchedulerClient;
 }

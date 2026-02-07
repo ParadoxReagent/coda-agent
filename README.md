@@ -1,8 +1,8 @@
 # coda - Personal AI Assistant Platform
 
-**Current Status: Phase 2 MVP Skills Complete**
+**Current Status: Phase 3 Event Infrastructure Complete**
 
-coda is a personal AI assistant that lives in Discord and manages your digital life. It connects to your email, calendar, and notes — and can deliver a morning briefing with a single message.
+coda is a personal AI assistant that lives in Discord and manages your digital life. It connects to your email, calendar, and notes — and can deliver a morning briefing with a single message. Phase 3 adds a durable event-driven backbone with proactive alerts and scheduled tasks.
 
 ## What Works Now
 
@@ -16,6 +16,10 @@ coda is a personal AI assistant that lives in Discord and manages your digital l
 - **Reminders** — Natural language time parsing ("in 2 hours", "every Monday at 9am"), background due-reminder alerts, snooze
 - **Notes** — Full-text search, tagging, `context:always` notes injected into every conversation
 - **Morning Briefing** — Say "good morning" and get an email summary, today's schedule, and pending reminders in one response
+- **Redis Streams Event Bus** — Durable at-least-once event delivery with consumer groups, idempotency, and dead letter queue
+- **Alert Router** — Configurable routing rules, quiet hours, per-event cooldowns, severity levels, and alert history audit trail
+- **Task Scheduler** — Cron-based scheduled tasks with retry, config overrides, and runtime enable/disable via Discord
+- **Alert Formatting** — Rich Discord embeds and Slack Block Kit formatting, color-coded by severity
 
 ## Quick Start (Development Mode)
 
@@ -195,6 +199,52 @@ Full-text search with PostgreSQL tsvector. Tag notes for organization — use `c
 
 Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available skills. Works gracefully when some skills are not configured.
 
+### Scheduler
+
+Manage cron-based scheduled tasks at runtime.
+
+| Tool | Description |
+|------|-------------|
+| `scheduler_list` | List all scheduled tasks with status, next run time, and last result |
+| `scheduler_toggle` | Enable or disable a task (requires confirmation) |
+
+Skills can register their own scheduled tasks at startup. Override schedules in `config.yaml`:
+
+```yaml
+scheduler:
+  tasks:
+    "health.check":
+      cron: "*/5 * * * *"
+      enabled: true
+```
+
+### Alert Routing
+
+Alerts are routed through configurable rules in `config.yaml`. Each event type can have its own severity, notification channels, cooldown period, and quiet hours behavior.
+
+```yaml
+alerts:
+  rules:
+    "alert.email.urgent":
+      severity: "high"
+      channels: ["discord"]
+      quietHours: true
+      cooldown: 300
+    "alert.reminder.due":
+      severity: "medium"
+      channels: ["discord"]
+      quietHours: true
+      cooldown: 60
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "07:00"
+    timezone: "America/New_York"
+    override_severities: ["high"]
+```
+
+High-severity alerts override quiet hours by default. All alerts (delivered and suppressed) are recorded in PostgreSQL for audit.
+
 ## Architecture Overview
 
 ```
@@ -216,15 +266,26 @@ Say "morning", "good morning", "briefing", or "/briefing" and coda composes a na
 │        │   │Manager  │   │   facts)        │
 └───┬────┘   └─────────┘   └────────────────┘
     │
-┌───▼──────────────────────────────────┐
-│  Email │ Calendar │ Reminders │ Notes │
-│  IMAP  │  CalDAV  │ chrono-node│  DB  │
-└──────────────────────────────────────┘
+┌───▼──────────────────────────────────────────┐
+│  Email │ Calendar │ Reminders │ Notes │ Sched │
+│  IMAP  │  CalDAV  │ chrono    │  DB   │ cron  │
+└──────────────────────────────────────────────┘
     │              │
-┌───▼───┐    ┌─────▼─────┐
-│ Redis │    │ PostgreSQL │
-│(cache) │    │ (persist)  │
-└────────┘    └────────────┘
+┌───▼──────────────▼─────────────────────┐
+│           Redis Streams Event Bus       │
+│  (consumer groups, idempotency, DLQ)    │
+├──────────────────┬─────────────────────┤
+│   Alert Router   │   Task Scheduler    │
+│  (rules, quiet   │  (cron, retry,      │
+│   hours, cooldown│   config overrides)  │
+│   audit trail)   │                     │
+└────────┬─────────┴─────────────────────┘
+         │
+┌────────▼──────┐    ┌──────────────┐
+│ Discord Sink  │    │  PostgreSQL   │
+│ (embeds/text) │    │  (persist +   │
+└───────────────┘    │  alert history)│
+                     └──────────────┘
 ```
 
 ## LLM Provider Configuration
@@ -285,10 +346,11 @@ Then use `/model set openrouter anthropic/claude-sonnet-4-5` to switch.
 ```bash
 pnpm dev           # Run with hot reload
 pnpm build         # Compile TypeScript
-pnpm test          # Run full test suite (193 tests)
+pnpm test          # Run full test suite (279 tests)
 pnpm test:unit     # Unit tests only
 pnpm test:integration  # Integration tests only
 pnpm test:phase2   # Phase 2 skill + integration tests
+pnpm test:phase3   # Phase 3 infrastructure + integration tests
 pnpm test:watch    # Run tests in watch mode
 pnpm lint          # Type check without building
 pnpm db:generate   # Generate Drizzle migrations
@@ -330,7 +392,17 @@ docker-compose logs -f coda-core
 - Real Redis-backed skill context
 - 108 new tests (193 total)
 
-### Phase 3-7: See phase plan files for roadmap
+### Phase 3: Event Infrastructure (Complete)
+- Redis Streams event bus (consumer groups, at-least-once delivery, idempotency keys, dead letter queue)
+- Alert router (configurable rules per event type, severity levels, quiet hours with overrides, per-event cooldowns)
+- Alert formatters (Discord embeds color-coded by severity, Slack Block Kit, plain text fallback)
+- Task scheduler (cron-based via croner, automatic retry, config overrides, runtime toggle)
+- Scheduler skill (list tasks, enable/disable via Discord with confirmation)
+- Discord alert sink (embeds + plain text delivery)
+- Alert history audit trail in PostgreSQL
+- 86 new tests (279 total)
+
+### Phase 4-7: See phase plan files for roadmap
 
 ## Security Notes
 
@@ -340,6 +412,7 @@ docker-compose logs -f coda-core
 - Destructive actions (creating calendar events) require confirmation tokens
 - PII is automatically redacted from logs
 - External skills are sandboxed with integrity verification
+- Alert cooldowns prevent notification spam; all alerts audited in PostgreSQL
 
 ## Troubleshooting
 
@@ -378,7 +451,8 @@ pnpm run lint
 - [Architecture Overview](personal-assistant-architecture.md)
 - [Phase 1 Plan](phase-1-foundation.md)
 - [Phase 2 Plan](phase-2-mvp-skills.md)
-- [Phase 3-7 Plans](phase-3-home-integration.md)
+- [Phase 3 Plan](phase-3-home-integration.md)
+- [Phase 4-7 Plans](phase-3-home-integration.md)
 
 ## License
 

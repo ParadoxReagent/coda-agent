@@ -142,18 +142,32 @@ export class ReminderSkill implements Skill {
     const checkIntervalSec =
       (ctx.config.check_interval_seconds as number | undefined) ?? 60;
 
-    // Start background reminder checker
-    this.checkInterval = setInterval(
-      () => this.checkDueReminders().catch((err) => {
-        this.logger.error({ error: err }, "Error checking due reminders");
-      }),
-      checkIntervalSec * 1000
-    );
-
-    this.logger.info(
-      { checkIntervalSec, timezone: this.timezone },
-      "Reminders skill started"
-    );
+    // Register with scheduler if available, otherwise fall back to setInterval
+    if (ctx.scheduler) {
+      ctx.scheduler.registerTask({
+        name: "check",
+        cronExpression: `*/${Math.max(1, Math.round(checkIntervalSec / 60))} * * * *`,
+        handler: async () => {
+          await this.checkDueReminders();
+        },
+        description: "Check for due reminders",
+      });
+      this.logger.info(
+        { checkIntervalSec, timezone: this.timezone },
+        "Reminders skill started (scheduler-managed)"
+      );
+    } else {
+      this.checkInterval = setInterval(
+        () => this.checkDueReminders().catch((err) => {
+          this.logger.error({ error: err }, "Error checking due reminders");
+        }),
+        checkIntervalSec * 1000
+      );
+      this.logger.info(
+        { checkIntervalSec, timezone: this.timezone },
+        "Reminders skill started (setInterval fallback)"
+      );
+    }
   }
 
   async shutdown(): Promise<void> {

@@ -21,10 +21,7 @@
   - Output: active Download Station tasks — filename, progress, speed, ETA
 - [ ] Tool: `nas_services`
   - Output: status of key DSM services (Docker, Surveillance Station, Hyper Backup)
-- [ ] Tool: `nas_surveillance`
-  - Input: `camera` (string, optional — specific camera or "all")
-  - Output: camera status, recent motion events, snapshot URL
-  - Discord: embed camera snapshot
+
 
 ### Proactive Alerts
 - [ ] `alert.nas.disk_warning` — disk health degraded, volume nearly full
@@ -146,7 +143,6 @@ Gate-tier tests must pass before proceeding to Phase 7. Run with `npm run test:p
 - [ ] `nas_downloads` returns active download tasks with progress
 - [ ] `nas_downloads` returns empty message when no downloads active
 - [ ] `nas_services` returns status of configured services
-- [ ] `nas_surveillance` returns camera status and snapshot URL
 - [ ] Handles NAS API unreachable gracefully
 
 **Proxmox Skill (`tests/unit/skills/proxmox/skill.test.ts`)**

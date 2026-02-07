@@ -2,13 +2,16 @@ import { loadConfig } from "./utils/config.js";
 import { createLogger } from "./utils/logger.js";
 import { ProviderManager } from "./core/llm/manager.js";
 import { InProcessEventBus } from "./core/events.js";
+import { RedisStreamEventBus } from "./core/redis-event-bus.js";
 import { AlertRouter } from "./core/alerts.js";
 import { ContextStore } from "./core/context.js";
 import { ConfirmationManager } from "./core/confirmation.js";
 import { Orchestrator } from "./core/orchestrator.js";
+import { TaskScheduler } from "./core/scheduler.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { ExternalSkillLoader } from "./skills/loader.js";
 import { DiscordBot } from "./interfaces/discord-bot.js";
+import { DiscordAlertSink } from "./core/sinks/discord-sink.js";
 import { RestApi } from "./interfaces/rest-api.js";
 import { createDatabase } from "./db/index.js";
 import { initializeDatabase } from "./db/connection.js";
@@ -16,8 +19,11 @@ import { NotesSkill } from "./skills/notes/skill.js";
 import { ReminderSkill } from "./skills/reminders/skill.js";
 import { CalendarSkill } from "./skills/calendar/skill.js";
 import { EmailSkill } from "./skills/email/skill.js";
+import { SchedulerSkill } from "./skills/scheduler/skill.js";
+import { N8nSkill } from "./skills/n8n/skill.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
+import type { EventBus } from "./core/events.js";
 import Redis from "ioredis";
 
 const logger = createLogger();
@@ -29,6 +35,7 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
     reminders: config.reminders,
     calendar: config.calendar,
     email: config.email,
+    n8n: {},
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
 }
@@ -51,9 +58,55 @@ async function main() {
 
   // 4. Initialize core services
   const providerManager = new ProviderManager(config.llm, logger);
-  const eventBus = new InProcessEventBus(logger);
-  const alertRouter = new AlertRouter(logger);
+
+  // Use Redis Streams event bus for production, with fallback
+  let eventBus: EventBus;
+  let redisEventBus: RedisStreamEventBus | null = null;
+  try {
+    redisEventBus = new RedisStreamEventBus(redis, logger);
+    eventBus = redisEventBus;
+    logger.info("Using Redis Streams event bus");
+  } catch {
+    eventBus = new InProcessEventBus(logger);
+    logger.warn("Falling back to in-process event bus");
+  }
+
+  // Configure alert router with Phase 3 enhancements
+  const alertsConfig = config.alerts;
+  const alertRouter = new AlertRouter(logger, redis, db, {
+    rules: alertsConfig?.rules ?? {},
+    quietHours: alertsConfig?.quiet_hours
+      ? {
+          enabled: alertsConfig.quiet_hours.enabled,
+          start: alertsConfig.quiet_hours.start,
+          end: alertsConfig.quiet_hours.end,
+          timezone: alertsConfig.quiet_hours.timezone,
+          overrideSeverities: alertsConfig.quiet_hours.override_severities,
+        }
+      : undefined,
+  });
   alertRouter.attachToEventBus(eventBus);
+
+  // Initialize task scheduler
+  const taskScheduler = new TaskScheduler(logger, eventBus);
+
+  // Register built-in scheduled tasks
+  taskScheduler.registerTask(
+    {
+      name: "health.check",
+      cronExpression: "*/5 * * * *",
+      handler: async () => {
+        logger.debug("Health check tick");
+      },
+      description: "Periodic health check (every 5 minutes)",
+    },
+    config.scheduler?.tasks?.["health.check"]
+      ? {
+          cron: config.scheduler.tasks["health.check"].cron,
+          enabled: config.scheduler.tasks["health.check"].enabled,
+        }
+      : undefined
+  );
 
   const contextStore = new ContextStore(logger);
   const confirmationManager = new ConfirmationManager(logger);
@@ -62,9 +115,10 @@ async function main() {
   const skillRegistry = new SkillRegistry(logger);
 
   // 6. Register internal skills
-  // Notes and Reminders always register (no required external config)
   skillRegistry.register(new NotesSkill());
   skillRegistry.register(new ReminderSkill());
+  skillRegistry.register(new SchedulerSkill(taskScheduler));
+  skillRegistry.register(new N8nSkill());
 
   // Calendar registers conditionally (requires CalDAV config)
   if (config.calendar) {
@@ -118,7 +172,7 @@ async function main() {
     logger
   );
 
-  // 9. Start all skills with context (real Redis-backed)
+  // 9. Start all skills with context (real Redis-backed + scheduler)
   await skillRegistry.startupAll((skillName: string): SkillContext => {
     const prefix = `skill:${skillName}:`;
     return {
@@ -141,6 +195,7 @@ async function main() {
       },
       eventBus,
       db,
+      scheduler: taskScheduler.getClientFor(skillName),
     };
   });
 
@@ -158,16 +213,31 @@ async function main() {
   );
   await discordBot.start();
 
+  // Register Discord alert sink
+  const discordSink = new DiscordAlertSink(discordBot);
+  alertRouter.registerSink("discord", discordSink);
+
   // 11. Start REST API (health checks)
   const restApi = new RestApi(logger);
   await restApi.start(config.server.port, config.server.host);
 
-  // 12. Graceful shutdown
+  // 12. Start event bus consumer (after all subscriptions are registered)
+  if (redisEventBus) {
+    redisEventBus.startConsumer().catch((err) => {
+      logger.error({ error: err }, "Event bus consumer error");
+    });
+  }
+
+  // 13. Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal");
     await discordBot.stop();
     await restApi.stop();
     await skillRegistry.shutdownAll();
+    taskScheduler.shutdown();
+    if (redisEventBus) {
+      await redisEventBus.stopConsumer();
+    }
     redis.disconnect();
     await dbClient.end();
     logger.info("Shutdown complete");

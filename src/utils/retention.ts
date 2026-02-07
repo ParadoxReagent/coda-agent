@@ -36,4 +36,19 @@ export const RETENTION = {
 
   /** Calendar event cache TTL in seconds (15 minutes) */
   CALENDAR_CACHE: 900,
+
+  /** Max length of the Redis event stream (MAXLEN ~) */
+  EVENT_STREAM_MAX_LEN: 10_000,
+
+  /** Idempotency key TTL in seconds (24 hours) */
+  IDEMPOTENCY_KEY_TTL: 86_400,
+
+  /** Alert history retention in seconds (90 days) */
+  ALERT_HISTORY_RETENTION: 7_776_000,
+
+  /** Traffic baseline window in seconds (24 hours) */
+  TRAFFIC_BASELINE_WINDOW: 86_400,
+
+  /** Traffic baseline data retention in seconds (7 days) */
+  TRAFFIC_BASELINE_DATA: 604_800,
 } as const;

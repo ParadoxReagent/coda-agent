@@ -102,6 +102,31 @@ const NotesConfigSchema = z.object({
   default_list_limit: z.number().default(20),
 });
 
+const AlertRuleSchema = z.object({
+  severity: z.enum(["high", "medium", "low"]),
+  channels: z.array(z.enum(["discord", "slack"])),
+  quietHours: z.boolean().default(true),
+  cooldown: z.number().default(300),
+});
+
+const AlertsConfigSchema = z.object({
+  rules: z.record(AlertRuleSchema).default({}),
+  quiet_hours: z.object({
+    enabled: z.boolean().default(false),
+    start: z.string().default("22:00"),
+    end: z.string().default("07:00"),
+    timezone: z.string().default("America/New_York"),
+    override_severities: z.array(z.enum(["high", "medium", "low"])).default(["high"]),
+  }).default({}),
+});
+
+const SchedulerConfigSchema = z.object({
+  tasks: z.record(z.object({
+    cron: z.string(),
+    enabled: z.boolean().default(true),
+  })).default({}),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -124,6 +149,8 @@ const AppConfigSchema = z.object({
   calendar: CalendarConfigSchema.optional(),
   reminders: RemindersConfigSchema.optional(),
   notes: NotesConfigSchema.optional(),
+  alerts: AlertsConfigSchema.optional(),
+  scheduler: SchedulerConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

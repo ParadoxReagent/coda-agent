@@ -90,6 +90,17 @@ export class DiscordBot {
     this.logger.info("Discord bot disconnected");
   }
 
+  async sendNotification(
+    content: string | { embeds: unknown[] }
+  ): Promise<void> {
+    const channel = await this.client.channels.fetch(this.config.channelId);
+    if (!channel || !("send" in channel)) {
+      this.logger.warn("Notification channel not found or not sendable");
+      return;
+    }
+    await (channel as { send: (msg: unknown) => Promise<unknown> }).send(content);
+  }
+
   private async handleMessage(message: Message): Promise<void> {
     // Security: only respond in designated channel, only to allowed users
     if (message.channelId !== this.config.channelId) return;

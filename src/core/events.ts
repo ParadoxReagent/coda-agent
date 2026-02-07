@@ -6,6 +6,7 @@ export interface CodaEvent {
   sourceSkill: string;
   payload: Record<string, unknown>;
   severity: "high" | "medium" | "low";
+  eventId?: string;
 }
 
 export interface EventBus {

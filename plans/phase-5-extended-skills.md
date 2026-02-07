@@ -165,7 +165,7 @@ This is where the TypeScript stack choice pays off. Playwright is a first-class 
 ## 5.5 Worker Process Architecture
 
 ### Why This Matters Now
-Phase 5 skills (browser automation, HA WebSocket event stream, 3D print adaptive polling) add significant long-running background processing. Running all of this in a single orchestrator process increases memory pressure and blast radius.
+Phase 5 skills (browser automation, HA WebSocket event stream) add significant long-running background processing. Running all of this in a single orchestrator process increases memory pressure and blast radius.
 
 ### Implementation
 - [ ] Define a `SkillWorker` interface for skills that need dedicated background processing:

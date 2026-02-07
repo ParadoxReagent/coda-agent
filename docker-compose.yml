@@ -24,6 +24,23 @@ services:
     networks:
       - coda-internal
 
+  n8n-webhook:
+    build: ./services/n8n-webhook
+    container_name: coda-n8n-webhook
+    restart: unless-stopped
+    networks:
+      - coda-internal
+      - lan-bridge
+    ports:
+      - "3001:3001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+      - LOG_LEVEL=info
+      - NODE_ENV=production
+    depends_on:
+      - redis
+
   postgres:
     image: postgres:16-alpine
     container_name: coda-postgres
@@ -46,6 +63,8 @@ volumes:
 
 networks:
   coda-internal:
+    driver: bridge
+  lan-bridge:
     driver: bridge
 
 secrets:
