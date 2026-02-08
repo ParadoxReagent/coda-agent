@@ -27,6 +27,7 @@ const LLMConfigSchema = z.object({
     .record(z.object({ input: z.number(), output: z.number() }))
     .optional(),
   daily_spend_alert_threshold: z.number().optional(),
+  failover_chain: z.array(z.string()).optional(),
 });
 
 const ExternalPolicySchema = z.object({
@@ -42,6 +43,13 @@ const SkillsConfigSchema = z.object({
 });
 
 const DiscordConfigSchema = z.object({
+  bot_token: z.string(),
+  channel_id: z.string(),
+  allowed_user_ids: z.array(z.string()),
+});
+
+const SlackConfigSchema = z.object({
+  app_token: z.string(),
   bot_token: z.string(),
   channel_id: z.string(),
   allowed_user_ids: z.array(z.string()),
@@ -145,6 +153,7 @@ const AppConfigSchema = z.object({
       host: z.string().default("0.0.0.0"),
     })
     .default({}),
+  slack: SlackConfigSchema.optional(),
   email: EmailConfigSchema.optional(),
   calendar: CalendarConfigSchema.optional(),
   reminders: RemindersConfigSchema.optional(),
@@ -247,6 +256,17 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     if (process.env.IMAP_HOST) email.imap_host = process.env.IMAP_HOST;
     if (process.env.IMAP_USER) email.imap_user = process.env.IMAP_USER;
     if (process.env.IMAP_PASS) email.imap_pass = process.env.IMAP_PASS;
+  }
+
+  // Slack overrides
+  if (process.env.SLACK_APP_TOKEN || process.env.SLACK_BOT_TOKEN) {
+    const slack = ensureObject(config, "slack");
+    if (process.env.SLACK_APP_TOKEN) slack.app_token = process.env.SLACK_APP_TOKEN;
+    if (process.env.SLACK_BOT_TOKEN) slack.bot_token = process.env.SLACK_BOT_TOKEN;
+    if (process.env.SLACK_CHANNEL_ID) slack.channel_id = process.env.SLACK_CHANNEL_ID;
+    if (process.env.SLACK_ALLOWED_USER_IDS) {
+      slack.allowed_user_ids = process.env.SLACK_ALLOWED_USER_IDS.split(",");
+    }
   }
 
   // CalDAV / Calendar overrides

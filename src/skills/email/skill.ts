@@ -3,6 +3,7 @@ import { EmailPoller } from "./poller.js";
 import { GmailClient } from "./gmail-client.js";
 import { OAuthManager } from "../../auth/oauth-manager.js";
 import { TokenStorage } from "../../auth/token-storage.js";
+import { ContentSanitizer } from "../../core/sanitizer.js";
 import type { EmailCategorizationRules } from "./types.js";
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
@@ -293,8 +294,8 @@ export class EmailSkill implements Skill {
       grouped[email.category]!.push({
         messageId: email.messageId,
         uid: email.uid,
-        from: email.from,
-        subject: email.subject,
+        from: ContentSanitizer.sanitizeEmailMetadata(email.from),
+        subject: ContentSanitizer.sanitizeEmailMetadata(email.subject),
         date: email.date,
       });
     }
@@ -331,15 +332,15 @@ export class EmailSkill implements Skill {
     return JSON.stringify({
       messageId: email.messageId,
       uid: email.uid,
-      from: email.from,
+      from: ContentSanitizer.sanitizeEmailMetadata(email.from),
       to: email.to,
       cc: email.cc,
-      subject: email.subject,
+      subject: ContentSanitizer.sanitizeEmailMetadata(email.subject),
       date: email.date,
       category: email.category,
       labels: email.labels,
       flags: email.flags,
-      snippet: email.snippet,
+      snippet: ContentSanitizer.sanitizeEmailMetadata(email.snippet ?? ""),
     });
   }
 
@@ -378,8 +379,8 @@ export class EmailSkill implements Skill {
       results: filtered.map((e) => ({
         messageId: e.messageId,
         uid: e.uid,
-        from: e.from,
-        subject: e.subject,
+        from: ContentSanitizer.sanitizeEmailMetadata(e.from),
+        subject: ContentSanitizer.sanitizeEmailMetadata(e.subject),
         date: e.date,
         category: e.category,
       })),

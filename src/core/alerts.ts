@@ -7,7 +7,9 @@ import { generateEventId } from "../utils/id.js";
 import {
   formatAlertPlainText,
   formatAlertForDiscord,
+  formatAlertForSlack,
 } from "./alert-formatters.js";
+import type { PreferencesManager } from "./preferences.js";
 
 export interface AlertRule {
   severity: "high" | "medium" | "low";
@@ -53,17 +55,20 @@ export class AlertRouter {
   private redis: Redis | null;
   private db: Database | null;
   private quietHours: QuietHoursConfig;
+  private preferences: PreferencesManager | null;
 
   constructor(
     logger: Logger,
     redis?: Redis | null,
     db?: Database | null,
-    config?: Partial<AlertRouterConfig>
+    config?: Partial<AlertRouterConfig>,
+    preferences?: PreferencesManager
   ) {
     this.logger = logger;
     this.redis = redis ?? null;
     this.db = db ?? null;
     this.quietHours = config?.quietHours ?? DEFAULT_QUIET_HOURS;
+    this.preferences = preferences ?? null;
     if (config?.rules) {
       this.rules = config.rules;
     }
@@ -111,6 +116,23 @@ export class AlertRouter {
       }
     }
 
+    // Check user DND preferences
+    if (this.preferences && event.payload?.userId) {
+      const userId = event.payload.userId as string;
+      const suppressed = await this.preferences.shouldSuppressAlert(
+        userId,
+        event.severity
+      );
+      if (suppressed) {
+        this.logger.info(
+          { eventType: event.eventType, userId },
+          "Alert suppressed by user DND"
+        );
+        await this.recordAlertHistory(eventId, event, null, false, true, "user_dnd");
+        return;
+      }
+    }
+
     // Check cooldown
     if (rule.cooldown > 0 && this.redis) {
       const cooldownKey = `alert:cooldown:${event.eventType}:${event.sourceSkill}`;
@@ -139,9 +161,12 @@ export class AlertRouter {
       const sink = this.sinks.get(channel);
       if (sink) {
         try {
-          // Try rich format first (Discord embeds)
+          // Try rich format first
           if (sink.sendRich && channel === "discord") {
             const formatted = formatAlertForDiscord(event);
+            await sink.sendRich(channel, formatted);
+          } else if (sink.sendRich && channel === "slack") {
+            const formatted = formatAlertForSlack(event);
             await sink.sendRich(channel, formatted);
           } else {
             const message = formatAlertPlainText(event);

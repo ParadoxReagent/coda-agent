@@ -387,11 +387,11 @@ export class N8nSkill implements Skill {
 
   private generateAlertSummary(payload: Record<string, unknown>): string {
     const data = payload.data as Record<string, unknown> | undefined;
-    if (data?.subject) return data.subject as string;
-    if (data?.title) return data.title as string;
-    if (data?.message) return data.message as string;
-    if (data?.summary) return data.summary as string;
+    if (data?.subject) return ContentSanitizer.sanitizeEmailMetadata(data.subject as string);
+    if (data?.title) return ContentSanitizer.sanitizeEmailMetadata(data.title as string);
+    if (data?.message) return ContentSanitizer.sanitizeEmailMetadata(data.message as string);
+    if (data?.summary) return ContentSanitizer.sanitizeEmailMetadata(data.summary as string);
 
-    return `${payload.type} event from ${(payload.source_workflow as string) || "n8n"}`;
+    return `${payload.type} event from ${ContentSanitizer.sanitizeHostname((payload.source_workflow as string) || "n8n")}`;
   }
 }

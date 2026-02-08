@@ -357,18 +357,39 @@ pnpm db:generate   # Generate Drizzle migrations
 pnpm db:migrate    # Run database migrations
 ```
 
-## Running with Docker (Full Stack)
+## Running with Docker (Quickstart)
+
+The fastest way to get coda running. Requires Docker and a Discord bot token + at least one LLM API key.
 
 ```bash
-# Copy secrets
-echo "coda" > secrets/pg_password.txt
+# First run — creates .env and tells you which credentials to fill in
+./scripts/quickstart.sh
 
-# Start services
-docker-compose up -d
+# Edit .env with your Discord token + API key
+vim .env
 
-# Check logs
-docker-compose logs -f coda-core
+# Second run — builds, starts, migrates, and runs everything
+./scripts/quickstart.sh
 ```
+
+The quickstart script handles all setup automatically:
+- Generates a random postgres password in `secrets/pg_password.txt`
+- Creates `.env` from `.env.example` with the password synced
+- Creates `config/config.yaml` from the example
+- Validates required credentials before starting
+- Runs `docker compose up --build -d`
+- Waits for the health check to pass
+
+Once running:
+
+```bash
+docker compose logs -f coda-core    # follow logs
+docker compose ps                   # container status
+curl localhost:3000/health           # health check
+docker compose down                 # stop all containers
+```
+
+Database migrations run automatically on every startup — no manual `pnpm db:migrate` step needed when using Docker.
 
 ## Project Status
 

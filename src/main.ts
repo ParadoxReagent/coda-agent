@@ -11,10 +11,16 @@ import { TaskScheduler } from "./core/scheduler.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { ExternalSkillLoader } from "./skills/loader.js";
 import { DiscordBot } from "./interfaces/discord-bot.js";
+import { SlackBot } from "./interfaces/slack-bot.js";
 import { DiscordAlertSink } from "./core/sinks/discord-sink.js";
+import { SlackAlertSink } from "./core/sinks/slack-sink.js";
 import { RestApi } from "./interfaces/rest-api.js";
+import { SkillHealthTracker } from "./core/skill-health.js";
+import { RateLimiter } from "./core/rate-limiter.js";
+import { PreferencesManager } from "./core/preferences.js";
 import { createDatabase } from "./db/index.js";
 import { initializeDatabase } from "./db/connection.js";
+import { runMigrations } from "./db/migrate.js";
 import { NotesSkill } from "./skills/notes/skill.js";
 import { ReminderSkill } from "./skills/reminders/skill.js";
 import { CalendarSkill } from "./skills/calendar/skill.js";
@@ -50,14 +56,18 @@ async function main() {
   // 2. Initialize database
   const { db, client: dbClient } = createDatabase(config.database.url);
   initializeDatabase(db);
+  await runMigrations(db);
   logger.info("Database initialized");
+
+  // 2b. Preferences manager
+  const preferencesManager = new PreferencesManager(db, logger);
 
   // 3. Initialize Redis
   const redis = new Redis(config.redis.url);
   logger.info("Redis connected");
 
   // 4. Initialize core services
-  const providerManager = new ProviderManager(config.llm, logger);
+  const skillHealthTracker = new SkillHealthTracker();
 
   // Use Redis Streams event bus for production, with fallback
   let eventBus: EventBus;
@@ -70,6 +80,9 @@ async function main() {
     eventBus = new InProcessEventBus(logger);
     logger.warn("Falling back to in-process event bus");
   }
+
+  // Initialize provider manager with event bus for circuit breaker alerts
+  const providerManager = new ProviderManager(config.llm, logger, eventBus);
 
   // Configure alert router with Phase 3 enhancements
   const alertsConfig = config.alerts;
@@ -84,7 +97,7 @@ async function main() {
           overrideSeverities: alertsConfig.quiet_hours.override_severities,
         }
       : undefined,
-  });
+  }, preferencesManager);
   alertRouter.attachToEventBus(eventBus);
 
   // Initialize task scheduler
@@ -108,11 +121,27 @@ async function main() {
       : undefined
   );
 
-  const contextStore = new ContextStore(logger);
-  const confirmationManager = new ConfirmationManager(logger);
+  // Register daily cost log task
+  taskScheduler.registerTask({
+    name: "llm.daily_cost_log",
+    cronExpression: "0 0 * * *", // midnight daily
+    handler: async () => {
+      const usage = providerManager.usage.getDailyUsage();
+      const totalCost = providerManager.usage.getTodayTotalCost();
+      logger.info(
+        { usage, totalCost },
+        "Daily LLM usage summary"
+      );
+    },
+    description: "Log daily LLM token usage summary at midnight",
+  });
 
-  // 5. Create skill registry
-  const skillRegistry = new SkillRegistry(logger);
+  const contextStore = new ContextStore(logger);
+  const confirmationManager = new ConfirmationManager(logger, eventBus);
+  const rateLimiter = new RateLimiter(redis, logger);
+
+  // 5. Create skill registry with health tracking and rate limiting
+  const skillRegistry = new SkillRegistry(logger, skillHealthTracker, rateLimiter);
 
   // 6. Register internal skills
   skillRegistry.register(new NotesSkill());
@@ -209,7 +238,8 @@ async function main() {
     orchestrator,
     providerManager,
     skillRegistry,
-    logger
+    logger,
+    preferencesManager
   );
   await discordBot.start();
 
@@ -217,8 +247,33 @@ async function main() {
   const discordSink = new DiscordAlertSink(discordBot);
   alertRouter.registerSink("discord", discordSink);
 
-  // 11. Start REST API (health checks)
-  const restApi = new RestApi(logger);
+  // Start Slack bot (optional)
+  let slackBot: SlackBot | undefined;
+  if (config.slack) {
+    slackBot = new SlackBot(
+      {
+        appToken: config.slack.app_token,
+        botToken: config.slack.bot_token,
+        channelId: config.slack.channel_id,
+        allowedUserIds: config.slack.allowed_user_ids,
+      },
+      orchestrator,
+      providerManager,
+      skillRegistry,
+      logger
+    );
+    await slackBot.start();
+
+    const slackSink = new SlackAlertSink(slackBot);
+    alertRouter.registerSink("slack", slackSink);
+  }
+
+  // 11. Start REST API (health checks) with real service deps
+  const restApi = new RestApi(logger, {
+    redis,
+    skillHealth: skillHealthTracker,
+    providerManager,
+  });
   await restApi.start(config.server.port, config.server.host);
 
   // 12. Start event bus consumer (after all subscriptions are registered)
@@ -232,6 +287,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal");
     await discordBot.stop();
+    if (slackBot) await slackBot.stop();
     await restApi.stop();
     await skillRegistry.shutdownAll();
     taskScheduler.shutdown();

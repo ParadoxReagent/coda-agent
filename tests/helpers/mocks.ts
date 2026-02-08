@@ -8,6 +8,8 @@ import type { Skill, SkillToolDefinition } from "../../src/skills/base.js";
 import type { SkillContext } from "../../src/skills/context.js";
 import type { EventBus, CodaEvent } from "../../src/core/events.js";
 import type { Logger } from "../../src/utils/logger.js";
+import type { RateLimitResult } from "../../src/core/rate-limiter.js";
+import type { SkillHealthTracker, SkillHealth } from "../../src/core/skill-health.js";
 import { vi } from "vitest";
 
 // ---- Mock Logger ----
@@ -279,6 +281,61 @@ export function createMockCalDAVClient(events: MockCalendarEvent[] = []) {
             e.description?.toLowerCase().includes(query.toLowerCase())
         )
     ),
+  };
+}
+
+// ---- Mock Rate Limiter ----
+export function createMockRateLimiter(
+  allowed: boolean = true
+): { check: ReturnType<typeof vi.fn> } {
+  return {
+    check: vi.fn(async (): Promise<RateLimitResult> => ({
+      allowed,
+      remaining: allowed ? 10 : 0,
+      retryAfterSeconds: allowed ? undefined : 60,
+    })),
+  };
+}
+
+// ---- Mock Skill Health Tracker ----
+export function createMockSkillHealthTracker(): {
+  recordSuccess: ReturnType<typeof vi.fn>;
+  recordFailure: ReturnType<typeof vi.fn>;
+  getHealth: ReturnType<typeof vi.fn>;
+  getAllHealth: ReturnType<typeof vi.fn>;
+  isAvailable: ReturnType<typeof vi.fn>;
+} {
+  return {
+    recordSuccess: vi.fn(),
+    recordFailure: vi.fn(),
+    getHealth: vi.fn((): SkillHealth => ({
+      status: "healthy",
+      consecutiveFailures: 0,
+      lastFailure: null,
+      lastSuccess: null,
+      totalFailures: 0,
+      totalSuccesses: 0,
+    })),
+    getAllHealth: vi.fn(() => new Map<string, SkillHealth>()),
+    isAvailable: vi.fn(() => true),
+  };
+}
+
+// ---- Mock Slack App ----
+export function createMockSlackApp() {
+  const messageHandlers: ((args: Record<string, unknown>) => Promise<void>)[] = [];
+
+  return {
+    message: vi.fn((handler: (args: Record<string, unknown>) => Promise<void>) => {
+      messageHandlers.push(handler);
+    }),
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    client: {
+      reactions: { add: vi.fn().mockResolvedValue(undefined) },
+      chat: { postMessage: vi.fn().mockResolvedValue(undefined) },
+    },
+    _messageHandlers: messageHandlers,
   };
 }
 

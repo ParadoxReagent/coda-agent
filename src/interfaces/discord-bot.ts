@@ -13,6 +13,7 @@ import type { Orchestrator } from "../core/orchestrator.js";
 import type { ProviderManager } from "../core/llm/manager.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { Logger } from "../utils/logger.js";
+import type { PreferencesManager } from "../core/preferences.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -37,13 +38,15 @@ export class DiscordBot {
   private skills: SkillRegistry;
   private logger: Logger;
   private allowedUserIds: Set<string>;
+  private preferences?: PreferencesManager;
 
   constructor(
     config: DiscordBotConfig,
     orchestrator: Orchestrator,
     providerManager: ProviderManager,
     skills: SkillRegistry,
-    logger: Logger
+    logger: Logger,
+    preferences?: PreferencesManager
   ) {
     this.config = config;
     this.orchestrator = orchestrator;
@@ -51,6 +54,7 @@ export class DiscordBot {
     this.skills = skills;
     this.logger = logger;
     this.allowedUserIds = new Set(config.allowedUserIds);
+    this.preferences = preferences;
 
     this.client = new Client({
       intents: [
@@ -183,6 +187,57 @@ export class DiscordBot {
         await this.handleModelCommand(interaction, subcommand);
         break;
       }
+
+      case "dnd": {
+        if (!this.preferences) {
+          await interaction.reply({ content: "Preferences not available.", ephemeral: true });
+          break;
+        }
+        const prefs = await this.preferences.getPreferences(interaction.user.id);
+        const newState = !prefs.dndEnabled;
+        await this.preferences.setDnd(interaction.user.id, newState);
+        await interaction.reply(
+          newState
+            ? "DND enabled — non-system alerts will be suppressed."
+            : "DND disabled — all alerts will be delivered."
+        );
+        break;
+      }
+
+      case "briefing": {
+        await interaction.deferReply();
+        const response = await this.orchestrator.handleMessage(
+          interaction.user.id,
+          "Give me my morning briefing",
+          "discord"
+        );
+        const chunks = chunkResponse(response, 1900);
+        await interaction.editReply(chunks[0] ?? "No briefing data available.");
+        for (let i = 1; i < chunks.length; i++) {
+          await interaction.followUp(chunks[i]!);
+        }
+        break;
+      }
+
+      case "quiet": {
+        if (!this.preferences) {
+          await interaction.reply({ content: "Preferences not available.", ephemeral: true });
+          break;
+        }
+        const start = interaction.options.getString("start");
+        const end = interaction.options.getString("end");
+        if (!start || !end) {
+          const prefs = await this.preferences.getPreferences(interaction.user.id);
+          const qh = prefs.quietHoursStart && prefs.quietHoursEnd
+            ? `${prefs.quietHoursStart} – ${prefs.quietHoursEnd}`
+            : "not set";
+          await interaction.reply(`Current quiet hours: ${qh}`);
+        } else {
+          await this.preferences.setQuietHours(interaction.user.id, start, end);
+          await interaction.reply(`Quiet hours set: ${start} – ${end}`);
+        }
+        break;
+      }
     }
   }
 
@@ -295,6 +350,30 @@ export class DiscordBot {
           sub
             .setName("status")
             .setDescription("Show current provider, model, and usage")
+        ),
+
+      new SlashCommandBuilder()
+        .setName("dnd")
+        .setDescription("Toggle Do Not Disturb mode"),
+
+      new SlashCommandBuilder()
+        .setName("briefing")
+        .setDescription("Trigger your morning briefing"),
+
+      new SlashCommandBuilder()
+        .setName("quiet")
+        .setDescription("Set or view quiet hours")
+        .addStringOption((opt) =>
+          opt
+            .setName("start")
+            .setDescription("Quiet hours start time (HH:MM)")
+            .setRequired(false)
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName("end")
+            .setDescription("Quiet hours end time (HH:MM)")
+            .setRequired(false)
         ),
     ];
 

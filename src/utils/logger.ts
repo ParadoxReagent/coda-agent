@@ -1,5 +1,5 @@
 /**
- * Structured logging with PII redaction.
+ * Structured logging with PII redaction and correlation context.
  *
  * Redaction policy:
  * - DEFAULT (INFO): Never logs message content, email bodies, or credentials
@@ -7,6 +7,7 @@
  * - All paths listed in `redact.paths` are replaced with "[REDACTED]"
  */
 import pino from "pino";
+import { getCurrentContext } from "../core/correlation.js";
 
 export function createLogger(name?: string) {
   const logger = pino({
@@ -32,6 +33,16 @@ export function createLogger(name?: string) {
         "*.messageContent",
       ],
       censor: "[REDACTED]",
+    },
+    mixin() {
+      const ctx = getCurrentContext();
+      if (ctx) {
+        return {
+          correlationId: ctx.correlationId,
+          ...(ctx.userId ? { userId: ctx.userId } : {}),
+        };
+      }
+      return {};
     },
     transport:
       process.env.NODE_ENV !== "production"

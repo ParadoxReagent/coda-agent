@@ -192,6 +192,24 @@ export const oauthTokens = pgTable(
   ]
 );
 
+/** User preferences for DND, quiet hours, alerts. */
+export const userPreferences = pgTable(
+  "user_preferences",
+  {
+    id: serial("id").primaryKey(),
+    userId: varchar("user_id", { length: 255 }).notNull().unique(),
+    dndEnabled: boolean("dnd_enabled").default(false).notNull(),
+    alertsOnly: boolean("alerts_only").default(false).notNull(),
+    quietHoursStart: varchar("quiet_hours_start", { length: 5 }),
+    quietHoursEnd: varchar("quiet_hours_end", { length: 5 }),
+    timezone: varchar("timezone", { length: 100 }).default("America/New_York").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("user_prefs_user_id_idx").on(table.userId),
+  ]
+);
+
 /** n8n workflow events ingested via webhook — supports any event type. */
 export const n8nEvents = pgTable(
   "n8n_events",

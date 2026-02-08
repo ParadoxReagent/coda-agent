@@ -216,12 +216,54 @@ export class ExternalSkillLoader {
       );
     }
 
+    // Validate tool definitions
+    const tools = skill.getTools();
+    for (const tool of tools) {
+      this.validateToolDefinition(manifest.name, tool);
+    }
+
     this.logger.info(
       { skill: manifest.name, version: manifest.version },
       "External skill loaded"
     );
 
     return { manifest, skill };
+  }
+
+  private validateToolDefinition(
+    skillName: string,
+    tool: { name: string; description: string; input_schema: Record<string, unknown> }
+  ): void {
+    // Tool name must match pattern
+    if (!/^[a-z][a-z0-9_]*$/.test(tool.name)) {
+      throw new Error(
+        `Skill "${skillName}" tool "${tool.name}" has an invalid name. ` +
+          `Names must match /^[a-z][a-z0-9_]*$/`
+      );
+    }
+
+    // Description must be non-empty and under 1000 chars
+    if (!tool.description || tool.description.length === 0) {
+      throw new Error(
+        `Skill "${skillName}" tool "${tool.name}" has an empty description`
+      );
+    }
+    if (tool.description.length > 1000) {
+      throw new Error(
+        `Skill "${skillName}" tool "${tool.name}" description exceeds 1000 characters`
+      );
+    }
+
+    // input_schema must be an object with type "object"
+    if (
+      !tool.input_schema ||
+      typeof tool.input_schema !== "object" ||
+      tool.input_schema.type !== "object"
+    ) {
+      throw new Error(
+        `Skill "${skillName}" tool "${tool.name}" input_schema must be an object with type: "object"`
+      );
+    }
   }
 
   private checkFilePermissions(filePath: string): void {

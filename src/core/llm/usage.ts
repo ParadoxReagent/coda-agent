@@ -1,4 +1,5 @@
 import type { Logger } from "../../utils/logger.js";
+import type { EventBus } from "../events.js";
 
 export interface UsageRecord {
   provider: string;
@@ -29,15 +30,18 @@ export class UsageTracker {
   private dailyAlertThreshold: number | undefined;
   private alertFired = false;
   private logger: Logger;
+  private eventBus?: EventBus;
 
   constructor(
     costRates?: Record<string, { input: number; output: number }>,
     dailyAlertThreshold?: number,
-    logger?: Logger
+    logger?: Logger,
+    eventBus?: EventBus
   ) {
     this.costRates = costRates ?? {};
     this.dailyAlertThreshold = dailyAlertThreshold;
     this.logger = logger ?? ({ warn: () => {}, info: () => {}, error: () => {} } as unknown as Logger);
+    this.eventBus = eventBus;
   }
 
   /** Track a single LLM request's usage. */
@@ -66,6 +70,22 @@ export class UsageTracker {
           { dailyCost, threshold: this.dailyAlertThreshold },
           "Daily LLM spend threshold exceeded"
         );
+
+        // Publish cost alert event
+        if (this.eventBus) {
+          this.eventBus.publish({
+            eventType: "alert.system.llm_cost",
+            timestamp: new Date().toISOString(),
+            sourceSkill: "system",
+            payload: {
+              dailyCost,
+              threshold: this.dailyAlertThreshold,
+            },
+            severity: "medium",
+          }).catch((e) => {
+            this.logger.error({ error: e }, "Failed to publish cost alert");
+          });
+        }
       }
     }
   }

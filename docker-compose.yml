@@ -4,16 +4,27 @@ services:
     container_name: coda-core
     restart: unless-stopped
     env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://coda:${POSTGRES_PASSWORD}@postgres:5432/coda
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./config:/app/config:ro
       - coda-data:/app/data
     networks:
       - coda-internal
     depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
@@ -23,6 +34,11 @@ services:
       - redis-data:/data
     networks:
       - coda-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   n8n-webhook:
     build: ./services/n8n-webhook
@@ -39,7 +55,8 @@ services:
       - LOG_LEVEL=info
       - NODE_ENV=production
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
@@ -55,6 +72,11 @@ services:
       - coda-internal
     secrets:
       - pg_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coda -d coda"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   coda-data:

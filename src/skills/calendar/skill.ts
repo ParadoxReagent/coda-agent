@@ -5,6 +5,7 @@ import {
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { Logger } from "../../utils/logger.js";
+import { ContentSanitizer } from "../../core/sanitizer.js";
 
 const DEFAULT_TIMEZONE = "America/New_York";
 
@@ -269,13 +270,17 @@ export class CalendarSkill implements Skill {
 }
 
 function formatEvent(event: CalendarEvent) {
+  const sanitized = ContentSanitizer.sanitizeCalendarEvent(
+    event.title,
+    event.description ?? undefined
+  );
   return {
     id: event.id,
-    title: event.title,
+    title: sanitized.title,
     startTime: event.startTime.toISOString(),
     endTime: event.endTime.toISOString(),
     location: event.location ?? null,
-    description: event.description ?? null,
+    description: sanitized.description,
     attendees: event.attendees,
     allDay: event.allDay,
   };

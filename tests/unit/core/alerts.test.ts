@@ -122,7 +122,7 @@ describe("AlertRouter", () => {
       await router.routeAlert(createEvent());
 
       expect(sink.sendRich).toHaveBeenCalledOnce();
-      expect(slackSink.send).toHaveBeenCalledOnce();
+      expect(slackSink.sendRich).toHaveBeenCalledOnce();
     });
   });
 
