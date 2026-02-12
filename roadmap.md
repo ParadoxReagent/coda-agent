@@ -137,4 +137,9 @@ ask for apis
 ask for discord things?
 slack things?
 
+Clean way for users to enable skills without modifying config and rebuilding
+
+CHECK FOR SECURTIY !!!!!!
+https://genai.owasp.org/llm-top-10/
+
 --------
