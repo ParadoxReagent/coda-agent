@@ -11,12 +11,20 @@ import {
   uuid,
   uniqueIndex,
   customType,
+  real,
 } from "drizzle-orm/pg-core";
 
 /** Custom tsvector type for PostgreSQL full-text search. */
 const tsvector = customType<{ data: string }>({
   dataType() {
     return "tsvector";
+  },
+});
+
+/** Custom vector type for pgvector embeddings. */
+const vector = customType<{ data: string }>({
+  dataType() {
+    return "vector(384)";
   },
 });
 
@@ -234,5 +242,36 @@ export const n8nEvents = pgTable(
     index("n8n_events_processed_idx").on(table.processed),
     index("n8n_events_priority_timestamp_idx").on(table.priority, table.timestamp),
     index("n8n_events_tags_idx").on(table.tags),
+  ]
+);
+
+/** Semantic memory store with vector embeddings for similarity search. */
+export const memories = pgTable(
+  "memories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    content: text("content").notNull(),
+    contentType: varchar("content_type", { length: 50 }).notNull(),
+    embedding: vector("embedding"),
+    sourceType: varchar("source_type", { length: 50 }).default("manual"),
+    sourceId: varchar("source_id", { length: 255 }),
+    importance: real("importance").default(0.5),
+    tags: text("tags").array().default([]).notNull(),
+    metadata: jsonb("metadata").default({}),
+    contentHash: varchar("content_hash", { length: 64 }),
+    accessCount: integer("access_count").default(0),
+    accessedAt: timestamp("accessed_at", { withTimezone: true }),
+    isArchived: boolean("is_archived").default(false).notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    searchVector: tsvector("search_vector"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("memories_content_type_idx").on(table.contentType),
+    index("memories_created_at_idx").on(table.createdAt),
+    index("memories_importance_idx").on(table.importance),
+    index("memories_tags_idx").on(table.tags),
+    index("memories_source_type_idx").on(table.sourceType),
   ]
 );

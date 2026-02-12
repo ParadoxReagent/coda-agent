@@ -58,8 +58,33 @@ services:
       redis:
         condition: service_healthy
 
+  memory-service:
+    build: ./services/memory
+    container_name: coda-memory
+    restart: unless-stopped
+    networks:
+      - coda-internal
+    environment:
+      - DATABASE_URL=postgresql://coda:${POSTGRES_PASSWORD}@postgres:5432/coda
+      - MEMORY_API_KEY=${MEMORY_API_KEY}
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - LOG_LEVEL=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: coda-postgres
     restart: unless-stopped
     environment:

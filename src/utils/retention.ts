@@ -51,4 +51,7 @@ export const RETENTION = {
 
   /** Traffic baseline data retention in seconds (7 days) */
   TRAFFIC_BASELINE_DATA: 604_800,
+
+  /** Memory context cache TTL in seconds (5 minutes) */
+  MEMORY_CONTEXT_CACHE: 300,
 } as const;

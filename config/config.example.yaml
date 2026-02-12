@@ -106,6 +106,14 @@ server:
 #     - "INBOX"
 #   poll_interval_seconds: 300
 
+# Memory — semantic memory with vector embeddings
+# memory:
+#   base_url: "http://memory-service:8010"
+#   api_key: "${MEMORY_API_KEY}"
+#   context_injection:
+#     enabled: true
+#     max_tokens: 1500
+
 skills:
   external_dirs: []
   external_policy:

@@ -15,11 +15,81 @@ coda is a personal AI assistant that lives in Discord and manages your digital l
 - **Calendar** — CalDAV integration, view today/upcoming events, create events with conflict detection, search
 - **Reminders** — Natural language time parsing ("in 2 hours", "every Monday at 9am"), background due-reminder alerts, snooze
 - **Notes** — Full-text search, tagging, `context:always` notes injected into every conversation
+- **Memory** — Semantic vector search (pgvector + sentence-transformers), auto-injected context, LLM-driven save/search
 - **Morning Briefing** — Say "good morning" and get an email summary, today's schedule, and pending reminders in one response
 - **Redis Streams Event Bus** — Durable at-least-once event delivery with consumer groups, idempotency, and dead letter queue
 - **Alert Router** — Configurable routing rules, quiet hours, per-event cooldowns, severity levels, and alert history audit trail
 - **Task Scheduler** — Cron-based scheduled tasks with retry, config overrides, and runtime enable/disable via Discord
 - **Alert Formatting** — Rich Discord embeds and Slack Block Kit formatting, color-coded by severity
+
+## Quick Deploy (Docker)
+
+Deploy the entire stack with a single command using Docker:
+
+```bash
+DISCORD_BOT_TOKEN=your_token \
+DISCORD_CHANNEL_ID=your_channel_id \
+OPENROUTER_API_KEY=your_key \
+./scripts/deploy.sh
+```
+
+### Prerequisites
+
+- Docker Desktop installed and running
+- Discord bot token (from [Discord Developer Portal](https://discord.com/developers/applications))
+- OpenRouter API key (or another LLM provider key)
+
+### What This Does
+
+The `deploy.sh` script automatically:
+- ✅ Checks Docker is running
+- ✅ Generates PostgreSQL password
+- ✅ Creates `.env` file with your credentials
+- ✅ Creates `config/config.yaml` with OpenRouter as default LLM provider
+- ✅ Builds and starts all containers (coda-core, postgres, redis, memory-service, n8n-webhook)
+- ✅ Runs database migrations
+- ✅ Waits for health check
+- ✅ Shows you helpful commands
+
+### Optional: Add Memory Service
+
+Include semantic memory (vector embeddings) by adding `MEMORY_API_KEY`:
+
+```bash
+DISCORD_BOT_TOKEN=your_token \
+DISCORD_CHANNEL_ID=your_channel_id \
+OPENROUTER_API_KEY=your_key \
+MEMORY_API_KEY=your_memory_key \
+./scripts/deploy.sh
+```
+
+### Alternative: Interactive Setup
+
+Prefer a guided setup? Use the interactive quickstart script:
+
+```bash
+./scripts/quickstart.sh  # Creates .env template
+vim .env                 # Edit with your credentials
+./scripts/quickstart.sh  # Builds and deploys
+```
+
+### After Deployment
+
+```bash
+# View logs
+docker compose logs -f coda-core
+
+# Check health
+curl localhost:3000/health
+
+# Container status
+docker compose ps
+
+# Stop all services
+docker compose down
+```
+
+Your bot is now running and will respond to messages in your Discord channel!
 
 ## Quick Start (Development Mode)
 
@@ -195,6 +265,20 @@ Full-text search with PostgreSQL tsvector. Tag notes for organization — use `c
 | `note_list` | Recent notes, optional tag filter |
 | `note_delete` | Delete by ID |
 
+### Memory
+
+Semantic memory powered by vector embeddings. The LLM decides what to remember and can retrieve information by *meaning*, not just keywords. Relevant memories are automatically injected into every conversation.
+
+| Tool | Description |
+|------|-------------|
+| `memory_save` | Save a fact, preference, or event to long-term memory with importance and tags |
+| `memory_search` | Find memories by meaning (semantic similarity), with optional type/tag filters |
+| `memory_context` | Get assembled context for a topic within a token budget |
+| `memory_list` | List recent memories, optionally filtered |
+| `memory_delete` | Soft-delete a memory by ID |
+
+Requires the memory service (Python, included in Docker Compose) and `MEMORY_API_KEY` in `.env`. See [`src/skills/memory/README.md`](src/skills/memory/README.md) for full setup.
+
 ### Morning Briefing
 
 Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available skills. Works gracefully when some skills are not configured.
@@ -258,6 +342,7 @@ High-severity alerts override quiet hours by default. All alerts (delivered and 
 │   (agent loop + tool calling)            │
 │   + briefing instructions                │
 │   + context:always notes injection       │
+│   + semantic memory context injection    │
 └───┬─────────────┬───────────────────┬───┘
     │             │                   │
 ┌───▼───┐   ┌────▼────┐   ┌─────────▼──────┐
@@ -266,12 +351,19 @@ High-severity alerts override quiet hours by default. All alerts (delivered and 
 │        │   │Manager  │   │   facts)        │
 └───┬────┘   └─────────┘   └────────────────┘
     │
-┌───▼──────────────────────────────────────────┐
-│  Email │ Calendar │ Reminders │ Notes │ Sched │
-│  IMAP  │  CalDAV  │ chrono    │  DB   │ cron  │
-└──────────────────────────────────────────────┘
-    │              │
-┌───▼──────────────▼─────────────────────┐
+┌───▼─────────────────────────────────────────────────┐
+│  Email │ Calendar │ Reminders │ Notes │ Memory│ Sched│
+│  IMAP  │  CalDAV  │ chrono    │  DB   │vectors│ cron │
+└──────────────────────────────────┬──────────────────┘
+    │              │               │
+    │              │    ┌──────────▼──────────┐
+    │              │    │   memory-service     │
+    │              │    │   (Python/FastAPI)   │
+    │              │    │   sentence-          │
+    │              │    │   transformers       │
+    │              │    └──────────┬───────────┘
+    │              │               │
+┌───▼──────────────▼───────────────▼─────┐
 │           Redis Streams Event Bus       │
 │  (consumer groups, idempotency, DLQ)    │
 ├──────────────────┬─────────────────────┤
@@ -283,8 +375,9 @@ High-severity alerts override quiet hours by default. All alerts (delivered and 
          │
 ┌────────▼──────┐    ┌──────────────┐
 │ Discord Sink  │    │  PostgreSQL   │
-│ (embeds/text) │    │  (persist +   │
-└───────────────┘    │  alert history)│
+│ (embeds/text) │    │  + pgvector   │
+└───────────────┘    │  (persist +   │
+                     │  embeddings)  │
                      └──────────────┘
 ```
 
@@ -357,9 +450,22 @@ pnpm db:generate   # Generate Drizzle migrations
 pnpm db:migrate    # Run database migrations
 ```
 
-## Running with Docker (Quickstart)
+## Running with Docker
 
 The fastest way to get coda running. Requires Docker and a Discord bot token + at least one LLM API key.
+
+### Option 1: One-Liner Deploy (Recommended)
+
+```bash
+DISCORD_BOT_TOKEN=your_token \
+DISCORD_CHANNEL_ID=your_channel_id \
+OPENROUTER_API_KEY=your_key \
+./scripts/deploy.sh
+```
+
+See the **Quick Deploy (Docker)** section above for full details.
+
+### Option 2: Interactive Quickstart
 
 ```bash
 # First run — creates .env and tells you which credentials to fill in
@@ -372,13 +478,13 @@ vim .env
 ./scripts/quickstart.sh
 ```
 
-The quickstart script handles all setup automatically:
-- Generates a random postgres password in `secrets/pg_password.txt`
-- Creates `.env` from `.env.example` with the password synced
-- Creates `config/config.yaml` from the example
-- Validates required credentials before starting
-- Runs `docker compose up --build -d`
-- Waits for the health check to pass
+Both scripts handle all setup automatically:
+- Generate a random postgres password in `secrets/pg_password.txt`
+- Create `.env` with credentials
+- Create `config/config.yaml` from the example
+- Validate required credentials before starting
+- Run `docker compose up --build -d`
+- Wait for the health check to pass
 
 Once running:
 

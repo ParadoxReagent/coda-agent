@@ -7,15 +7,16 @@ import {
   validateWebhookSecret,
   type N8nWebhookPayloadType,
 } from "./validation.js";
-import { pino } from "pino";
-
-const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
 const REDIS_URL = process.env.REDIS_URL || "redis://redis:6379";
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 
-const fastify = Fastify({ logger });
+const fastify = Fastify({
+  logger: {
+    level: process.env.LOG_LEVEL || "info"
+  }
+});
 const eventBus = new EventBusClient(REDIS_URL);
 
 await fastify.register(helmet);
@@ -65,7 +66,7 @@ fastify.post<{ Body: N8nWebhookPayloadType }>(
 
     const parseResult = N8nWebhookPayload.safeParse(request.body);
     if (!parseResult.success) {
-      logger.warn({ errors: parseResult.error }, "Invalid webhook payload");
+      fastify.log.warn({ errors: parseResult.error }, "Invalid webhook payload");
       return reply.code(400).send({
         error: "Invalid payload",
         details: parseResult.error.format(),
@@ -104,7 +105,7 @@ fastify.post<{ Body: N8nWebhookPayloadType }>(
         severity: severityMap[payload.priority] ?? "medium",
       });
 
-      logger.info(
+      fastify.log.info(
         {
           type: payload.type,
           category: payload.category,
@@ -121,7 +122,7 @@ fastify.post<{ Body: N8nWebhookPayloadType }>(
         event_type: `n8n.${payload.type}.received`,
       };
     } catch (err) {
-      logger.error({ error: err }, "Failed to publish event");
+      fastify.log.error({ error: err }, "Failed to publish event");
       return reply.code(500).send({ error: "Internal server error" });
     }
   }
@@ -160,15 +161,15 @@ function sanitizeData(
 async function start() {
   try {
     await fastify.listen({ port: PORT, host: HOST });
-    logger.info(`Webhook service listening on ${HOST}:${PORT}`);
+    fastify.log.info(`Webhook service listening on ${HOST}:${PORT}`);
   } catch (err) {
-    logger.error(err);
+    fastify.log.error(err);
     process.exit(1);
   }
 }
 
 process.on("SIGTERM", async () => {
-  logger.info("SIGTERM received, shutting down gracefully");
+  fastify.log.info("SIGTERM received, shutting down gracefully");
   await fastify.close();
   await eventBus.disconnect();
   process.exit(0);

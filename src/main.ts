@@ -27,6 +27,7 @@ import { CalendarSkill } from "./skills/calendar/skill.js";
 import { EmailSkill } from "./skills/email/skill.js";
 import { SchedulerSkill } from "./skills/scheduler/skill.js";
 import { N8nSkill } from "./skills/n8n/skill.js";
+import { MemorySkill } from "./skills/memory/skill.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
@@ -41,6 +42,7 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
     reminders: config.reminders,
     calendar: config.calendar,
     email: config.email,
+    memory: config.memory,
     n8n: {},
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
@@ -164,6 +166,15 @@ async function main() {
       skillRegistry.register(new EmailSkill(), config.email);
     } catch (err) {
       logger.warn({ error: err }, "Email skill not registered — missing config");
+    }
+  }
+
+  // Memory registers conditionally (requires API key)
+  if (config.memory) {
+    try {
+      skillRegistry.register(new MemorySkill(), config.memory);
+    } catch (err) {
+      logger.warn({ error: err }, "Memory skill not registered — missing config");
     }
   }
 

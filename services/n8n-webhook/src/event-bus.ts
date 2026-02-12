@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 
 const STREAM_KEY = "coda:events";
 const MAX_STREAM_LEN = 10_000;

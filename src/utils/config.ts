@@ -128,6 +128,15 @@ const AlertsConfigSchema = z.object({
   }).default({}),
 });
 
+const MemoryConfigSchema = z.object({
+  base_url: z.string().default("http://memory-service:8010"),
+  api_key: z.string(),
+  context_injection: z.object({
+    enabled: z.boolean().default(true),
+    max_tokens: z.number().default(1500),
+  }).default({}),
+});
+
 const SchedulerConfigSchema = z.object({
   tasks: z.record(z.object({
     cron: z.string(),
@@ -158,6 +167,7 @@ const AppConfigSchema = z.object({
   calendar: CalendarConfigSchema.optional(),
   reminders: RemindersConfigSchema.optional(),
   notes: NotesConfigSchema.optional(),
+  memory: MemoryConfigSchema.optional(),
   alerts: AlertsConfigSchema.optional(),
   scheduler: SchedulerConfigSchema.optional(),
 });
@@ -267,6 +277,13 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     if (process.env.SLACK_ALLOWED_USER_IDS) {
       slack.allowed_user_ids = process.env.SLACK_ALLOWED_USER_IDS.split(",");
     }
+  }
+
+  // Memory service overrides
+  if (process.env.MEMORY_API_KEY) {
+    const memory = ensureObject(config, "memory");
+    memory.api_key = process.env.MEMORY_API_KEY;
+    if (process.env.MEMORY_SERVICE_URL) memory.base_url = process.env.MEMORY_SERVICE_URL;
   }
 
   // CalDAV / Calendar overrides

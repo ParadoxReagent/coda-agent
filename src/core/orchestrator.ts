@@ -6,6 +6,7 @@ import type { ConfirmationManager } from "./confirmation.js";
 import type { LLMContentBlock, LLMMessage } from "./llm/provider.js";
 import type { Logger } from "../utils/logger.js";
 import type { NotesSkill } from "../skills/notes/skill.js";
+import type { MemorySkill } from "../skills/memory/skill.js";
 import { ResilientExecutor } from "./resilient-executor.js";
 import { withContext, createCorrelationId } from "./correlation.js";
 
@@ -63,7 +64,7 @@ export class Orchestrator {
         provider.capabilities.tools !== false
           ? this.skills.getToolDefinitions()
           : undefined;
-      const system = await this.buildSystemPrompt(userId);
+      const system = await this.buildSystemPrompt(userId, message);
 
       // 4. Build messages
       const messages: LLMMessage[] = [
@@ -294,7 +295,19 @@ export class Orchestrator {
     return [];
   }
 
-  private async buildSystemPrompt(userId: string): Promise<string> {
+  private async getMemoryContext(userMessage: string): Promise<string | null> {
+    try {
+      const memorySkill = this.skills.getSkillByName("memory") as MemorySkill | undefined;
+      if (memorySkill?.getRelevantMemories) {
+        return await memorySkill.getRelevantMemories(userMessage, 1500);
+      }
+    } catch (err) {
+      this.logger.error({ error: err }, "Failed to fetch memory context");
+    }
+    return null;
+  }
+
+  private async buildSystemPrompt(userId: string, userMessage?: string): Promise<string> {
     const skillDescriptions = this.skills
       .listSkills()
       .map((s) => `- **${s.name}**: ${s.description}`)
@@ -306,6 +319,15 @@ export class Orchestrator {
       contextNotes.length > 0
         ? `\n\nUser notes (always visible):\n${contextNotes.map((n) => `- ${n}`).join("\n")}`
         : "";
+
+    // Fetch relevant memories for context injection
+    let memorySection = "";
+    if (userMessage) {
+      const memoryContext = await this.getMemoryContext(userMessage);
+      if (memoryContext) {
+        memorySection = `\n\nRelevant memories:\n${memoryContext}`;
+      }
+    }
 
     return `You are coda, a personal AI assistant. You help your user manage their digital life.
 
@@ -330,6 +352,6 @@ When the user says "morning", "briefing", "good morning", or "/briefing":
 1. Call email_check for an email summary (if available)
 2. Call calendar_today for today's schedule (if available)
 3. Call reminder_list for pending reminders (if available)
-Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${notesSection}`;
+Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${notesSection}${memorySection}`;
   }
 }
