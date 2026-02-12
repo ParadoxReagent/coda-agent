@@ -132,5 +132,9 @@ https://prompt.security/clawsec
 stock checker?
 self-repair/doctor?
 self improving?
+ask user what LLM in cli while starting
+ask for apis
+ask for discord things?
+slack things?
 
 --------
