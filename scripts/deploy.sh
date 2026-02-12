@@ -30,7 +30,56 @@ fi
 
 echo -e "${GREEN}✓ Docker is running${NC}"
 
-# 2. Check for required environment variables
+# 2. Load existing .env file if it exists
+if [ -f .env ]; then
+    echo -e "${YELLOW}Loading existing .env file...${NC}"
+
+    # Save shell environment variables (these take priority)
+    SHELL_DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-}"
+    SHELL_DISCORD_CHANNEL_ID="${DISCORD_CHANNEL_ID:-}"
+    SHELL_DISCORD_ALLOWED_USER_IDS="${DISCORD_ALLOWED_USER_IDS:-}"
+    SHELL_OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+    SHELL_ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+    SHELL_OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+    SHELL_GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
+    SHELL_MEMORY_API_KEY="${MEMORY_API_KEY:-}"
+    SHELL_GMAIL_OAUTH_CLIENT_ID="${GMAIL_OAUTH_CLIENT_ID:-}"
+    SHELL_GMAIL_OAUTH_CLIENT_SECRET="${GMAIL_OAUTH_CLIENT_SECRET:-}"
+    SHELL_GMAIL_OAUTH_REDIRECT_PORT="${GMAIL_OAUTH_REDIRECT_PORT:-}"
+    SHELL_GMAIL_USER="${GMAIL_USER:-}"
+
+    # Source .env file safely (don't crash if malformed)
+    set +e
+    source .env 2>/dev/null
+    SOURCE_RESULT=$?
+    set -e
+
+    if [ $SOURCE_RESULT -eq 0 ]; then
+        echo -e "${GREEN}✓ Loaded existing .env file${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Warning: .env exists but could not be sourced${NC}"
+    fi
+
+    # Restore shell environment variables (they override .env)
+    [ -n "$SHELL_DISCORD_BOT_TOKEN" ] && DISCORD_BOT_TOKEN="$SHELL_DISCORD_BOT_TOKEN"
+    [ -n "$SHELL_DISCORD_CHANNEL_ID" ] && DISCORD_CHANNEL_ID="$SHELL_DISCORD_CHANNEL_ID"
+    [ -n "$SHELL_DISCORD_ALLOWED_USER_IDS" ] && DISCORD_ALLOWED_USER_IDS="$SHELL_DISCORD_ALLOWED_USER_IDS"
+    [ -n "$SHELL_OPENROUTER_API_KEY" ] && OPENROUTER_API_KEY="$SHELL_OPENROUTER_API_KEY"
+    [ -n "$SHELL_ANTHROPIC_API_KEY" ] && ANTHROPIC_API_KEY="$SHELL_ANTHROPIC_API_KEY"
+    [ -n "$SHELL_OPENAI_API_KEY" ] && OPENAI_API_KEY="$SHELL_OPENAI_API_KEY"
+    [ -n "$SHELL_GOOGLE_API_KEY" ] && GOOGLE_API_KEY="$SHELL_GOOGLE_API_KEY"
+    [ -n "$SHELL_MEMORY_API_KEY" ] && MEMORY_API_KEY="$SHELL_MEMORY_API_KEY"
+    [ -n "$SHELL_GMAIL_OAUTH_CLIENT_ID" ] && GMAIL_OAUTH_CLIENT_ID="$SHELL_GMAIL_OAUTH_CLIENT_ID"
+    [ -n "$SHELL_GMAIL_OAUTH_CLIENT_SECRET" ] && GMAIL_OAUTH_CLIENT_SECRET="$SHELL_GMAIL_OAUTH_CLIENT_SECRET"
+    [ -n "$SHELL_GMAIL_OAUTH_REDIRECT_PORT" ] && GMAIL_OAUTH_REDIRECT_PORT="$SHELL_GMAIL_OAUTH_REDIRECT_PORT"
+    [ -n "$SHELL_GMAIL_USER" ] && GMAIL_USER="$SHELL_GMAIL_USER"
+
+    echo -e "${GREEN}✓ Variables merged (shell overrides .env)${NC}"
+else
+    echo -e "${YELLOW}No existing .env found - will create new one${NC}"
+fi
+
+# 3. Check for required environment variables
 MISSING_VARS=()
 
 if [ -z "$DISCORD_BOT_TOKEN" ]; then
@@ -52,7 +101,14 @@ if [ ${#MISSING_VARS[@]} -ne 0 ]; then
     done
     echo ""
     echo -e "${YELLOW}Usage:${NC}"
-    echo "  DISCORD_BOT_TOKEN=xxx DISCORD_CHANNEL_ID=123 OPENROUTER_API_KEY=xxx ./scripts/deploy.sh"
+    echo "  First run (provide all required variables):"
+    echo "    DISCORD_BOT_TOKEN=xxx DISCORD_CHANNEL_ID=123 OPENROUTER_API_KEY=xxx ./scripts/deploy.sh"
+    echo ""
+    echo "  Subsequent runs (reads from existing .env):"
+    echo "    ./scripts/deploy.sh"
+    echo ""
+    echo "  Override specific variables:"
+    echo "    DISCORD_CHANNEL_ID=456 ./scripts/deploy.sh"
     echo ""
     echo -e "${YELLOW}Or for interactive setup, use:${NC}"
     echo "  ./scripts/quickstart.sh"
@@ -76,42 +132,68 @@ fi
 
 PG_PASSWORD=$(cat secrets/pg_password.txt)
 
-# 5. Create .env file
-echo -e "${YELLOW}Creating .env file...${NC}"
+# 5. Update .env file
+echo -e "${YELLOW}Updating .env file...${NC}"
 
-cat > .env << EOF
-# Discord Configuration
-DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
-${DISCORD_ALLOWED_USER_IDS:+DISCORD_ALLOWED_USER_IDS=${DISCORD_ALLOWED_USER_IDS}}
+# Function to update or append a variable
+update_env_var() {
+    local key="$1"
+    local value="$2"
+    local file=".env"
 
-# Database Configuration (Docker overrides these)
-DATABASE_URL=postgresql://coda:${PG_PASSWORD}@postgres:5432/coda
-POSTGRES_PASSWORD=${PG_PASSWORD}
-REDIS_URL=redis://redis:6379
+    if [ -z "$value" ]; then
+        return  # Skip empty values
+    fi
 
-# LLM Provider Configuration
-${OPENROUTER_API_KEY:+OPENROUTER_API_KEY=${OPENROUTER_API_KEY}}
-${ANTHROPIC_API_KEY:+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}}
-${OPENAI_API_KEY:+OPENAI_API_KEY=${OPENAI_API_KEY}}
-${GOOGLE_API_KEY:+GOOGLE_API_KEY=${GOOGLE_API_KEY}}
+    if grep -q "^${key}=" "$file" 2>/dev/null; then
+        # Update existing line
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|^${key}=.*|${key}=${value}|" "$file"
+        else
+            sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+        fi
+    else
+        # Append new variable
+        echo "${key}=${value}" >> "$file"
+    fi
+}
 
-# Optional Services
-${MEMORY_API_KEY:+MEMORY_API_KEY=${MEMORY_API_KEY}}
+# Create .env from example if it doesn't exist
+if [ ! -f .env ]; then
+    if [ -f .env.example ]; then
+        cp .env.example .env
+        echo -e "${GREEN}✓ Created .env from .env.example${NC}"
+    else
+        touch .env
+        echo -e "${GREEN}✓ Created blank .env${NC}"
+    fi
+fi
 
-# Email Configuration (Optional)
-${GMAIL_OAUTH_CLIENT_ID:+GMAIL_OAUTH_CLIENT_ID=${GMAIL_OAUTH_CLIENT_ID}}
-${GMAIL_OAUTH_CLIENT_SECRET:+GMAIL_OAUTH_CLIENT_SECRET=${GMAIL_OAUTH_CLIENT_SECRET}}
-${GMAIL_OAUTH_REDIRECT_PORT:+GMAIL_OAUTH_REDIRECT_PORT=${GMAIL_OAUTH_REDIRECT_PORT}}
-${GMAIL_USER:+GMAIL_USER=${GMAIL_USER}}
+# Update required values
+update_env_var "DISCORD_BOT_TOKEN" "${DISCORD_BOT_TOKEN}"
+update_env_var "DISCORD_CHANNEL_ID" "${DISCORD_CHANNEL_ID}"
+update_env_var "DATABASE_URL" "postgresql://coda:${PG_PASSWORD}@postgres:5432/coda"
+update_env_var "POSTGRES_PASSWORD" "${PG_PASSWORD}"
+update_env_var "REDIS_URL" "redis://redis:6379"
 
-# Application Configuration
-NODE_ENV=production
-LOG_LEVEL=info
-CONFIG_PATH=./config/config.yaml
-EOF
+# Update optional values only if set
+[ -n "${DISCORD_ALLOWED_USER_IDS:-}" ] && update_env_var "DISCORD_ALLOWED_USER_IDS" "${DISCORD_ALLOWED_USER_IDS}"
+[ -n "${OPENROUTER_API_KEY:-}" ] && update_env_var "OPENROUTER_API_KEY" "${OPENROUTER_API_KEY}"
+[ -n "${ANTHROPIC_API_KEY:-}" ] && update_env_var "ANTHROPIC_API_KEY" "${ANTHROPIC_API_KEY}"
+[ -n "${OPENAI_API_KEY:-}" ] && update_env_var "OPENAI_API_KEY" "${OPENAI_API_KEY}"
+[ -n "${GOOGLE_API_KEY:-}" ] && update_env_var "GOOGLE_API_KEY" "${GOOGLE_API_KEY}"
+[ -n "${MEMORY_API_KEY:-}" ] && update_env_var "MEMORY_API_KEY" "${MEMORY_API_KEY}"
+[ -n "${GMAIL_OAUTH_CLIENT_ID:-}" ] && update_env_var "GMAIL_OAUTH_CLIENT_ID" "${GMAIL_OAUTH_CLIENT_ID}"
+[ -n "${GMAIL_OAUTH_CLIENT_SECRET:-}" ] && update_env_var "GMAIL_OAUTH_CLIENT_SECRET" "${GMAIL_OAUTH_CLIENT_SECRET}"
+[ -n "${GMAIL_OAUTH_REDIRECT_PORT:-}" ] && update_env_var "GMAIL_OAUTH_REDIRECT_PORT" "${GMAIL_OAUTH_REDIRECT_PORT}"
+[ -n "${GMAIL_USER:-}" ] && update_env_var "GMAIL_USER" "${GMAIL_USER}"
 
-echo -e "${GREEN}✓ .env file created${NC}"
+# Ensure application config is set
+update_env_var "NODE_ENV" "production"
+update_env_var "LOG_LEVEL" "info"
+update_env_var "CONFIG_PATH" "./config/config.yaml"
+
+echo -e "${GREEN}✓ .env file updated${NC}"
 
 # 6. Create config.yaml with appropriate LLM provider
 echo -e "${YELLOW}Creating config.yaml...${NC}"
