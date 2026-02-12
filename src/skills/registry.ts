@@ -76,11 +76,30 @@ export class SkillRegistry {
     );
   }
 
-  /** Get all tool definitions across all registered skills. */
-  getToolDefinitions(): LLMToolDefinition[] {
+  /** Get all tool definitions across all registered skills, with optional filtering. */
+  getToolDefinitions(options?: {
+    allowedSkills?: string[];
+    blockedTools?: string[];
+    excludeMainAgentOnly?: boolean;
+  }): LLMToolDefinition[] {
     const definitions: LLMToolDefinition[] = [];
-    for (const { tools } of this.skills.values()) {
+    for (const [skillName, { tools }] of this.skills) {
+      // Filter by allowed skills if specified
+      if (options?.allowedSkills && !options.allowedSkills.includes(skillName)) {
+        continue;
+      }
+
       for (const tool of tools.values()) {
+        // Filter out blocked tools
+        if (options?.blockedTools?.includes(tool.name)) {
+          continue;
+        }
+
+        // Filter out mainAgentOnly tools when requested
+        if (options?.excludeMainAgentOnly && tool.mainAgentOnly) {
+          continue;
+        }
+
         definitions.push({
           name: tool.name,
           description: tool.description,

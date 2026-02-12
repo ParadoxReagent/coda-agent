@@ -28,6 +28,8 @@ import { EmailSkill } from "./skills/email/skill.js";
 import { SchedulerSkill } from "./skills/scheduler/skill.js";
 import { N8nSkill } from "./skills/n8n/skill.js";
 import { MemorySkill } from "./skills/memory/skill.js";
+import { SubagentSkill } from "./skills/subagents/skill.js";
+import { SubagentManager } from "./core/subagent-manager.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
@@ -178,6 +180,10 @@ async function main() {
     }
   }
 
+  // 6b. Register subagent skill (tools registered now, manager wired after orchestrator)
+  const subagentSkill = new SubagentSkill();
+  skillRegistry.register(subagentSkill);
+
   // 7. Load external skills
   if (config.skills.external_dirs.length > 0) {
     const loader = new ExternalSkillLoader(logger, {
@@ -212,6 +218,32 @@ async function main() {
     logger
   );
 
+  // 8b. Initialize SubagentManager
+  const subagentConfig = config.subagents ?? {
+    enabled: true,
+    default_timeout_minutes: 5,
+    max_timeout_minutes: 10,
+    sync_timeout_seconds: 120,
+    max_concurrent_per_user: 3,
+    max_concurrent_global: 10,
+    archive_ttl_minutes: 60,
+    max_tool_calls_per_run: 25,
+    default_token_budget: 50000,
+    max_token_budget: 200000,
+    spawn_rate_limit: { max_requests: 10, window_seconds: 3600 },
+    cleanup_interval_seconds: 60,
+  };
+
+  const subagentManager = new SubagentManager(
+    subagentConfig,
+    skillRegistry,
+    providerManager,
+    eventBus,
+    rateLimiter,
+    logger
+  );
+  subagentSkill.setManager(subagentManager);
+
   // 9. Start all skills with context (real Redis-backed + scheduler)
   await skillRegistry.startupAll((skillName: string): SkillContext => {
     const prefix = `skill:${skillName}:`;
@@ -239,6 +271,9 @@ async function main() {
     };
   });
 
+  // 9b. Start SubagentManager
+  subagentManager.startup();
+
   // 10. Start Discord bot
   const discordBot = new DiscordBot(
     {
@@ -250,7 +285,8 @@ async function main() {
     providerManager,
     skillRegistry,
     logger,
-    preferencesManager
+    preferencesManager,
+    subagentManager
   );
   await discordBot.start();
 
@@ -279,6 +315,18 @@ async function main() {
     alertRouter.registerSink("slack", slackSink);
   }
 
+  // 10b. Wire subagent announcement callback
+  subagentManager.setAnnounceCallback(async (channel: string, message: string) => {
+    if (channel === "discord") {
+      await discordBot.sendNotification(message);
+    } else if (channel === "slack" && slackBot) {
+      await slackBot.sendNotification(message);
+    } else {
+      // Default to Discord for unknown channels
+      await discordBot.sendNotification(message);
+    }
+  });
+
   // 11. Start REST API (health checks) with real service deps
   const restApi = new RestApi(logger, {
     redis,
@@ -297,6 +345,7 @@ async function main() {
   // 13. Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal");
+    await subagentManager.shutdown();
     await discordBot.stop();
     if (slackBot) await slackBot.stop();
     await restApi.stop();

@@ -245,6 +245,42 @@ export const n8nEvents = pgTable(
   ]
 );
 
+/** Subagent run records for tracking lifecycle and audit. */
+export const subagentRuns = pgTable(
+  "subagent_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    channel: varchar("channel", { length: 50 }).notNull(),
+    parentRunId: uuid("parent_run_id"),
+    task: text("task").notNull(),
+    status: varchar("status", { length: 20 }).default("accepted").notNull(),
+    mode: varchar("mode", { length: 10 }).default("async").notNull(),
+    model: varchar("model", { length: 255 }),
+    provider: varchar("provider", { length: 100 }),
+    result: text("result"),
+    error: text("error"),
+    inputTokens: integer("input_tokens").default(0).notNull(),
+    outputTokens: integer("output_tokens").default(0).notNull(),
+    toolCallCount: integer("tool_call_count").default(0).notNull(),
+    timeoutMs: integer("timeout_ms").notNull(),
+    transcript: jsonb("transcript").default([]).notNull(),
+    metadata: jsonb("metadata").default({}).notNull(),
+    allowedTools: text("allowed_tools").array(),
+    blockedTools: text("blocked_tools").array(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("subagent_runs_user_status_idx").on(table.userId, table.status),
+    index("subagent_runs_created_at_idx").on(table.createdAt),
+    index("subagent_runs_status_idx").on(table.status),
+    index("subagent_runs_parent_run_id_idx").on(table.parentRunId),
+  ]
+);
+
 /** Semantic memory store with vector embeddings for similarity search. */
 export const memories = pgTable(
   "memories",

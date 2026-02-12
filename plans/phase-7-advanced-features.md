@@ -99,45 +99,30 @@
 
 ---
 
-## 7.3 Multi-Agent Architecture
+## 7.3 Multi-Agent Architecture — IMPLEMENTED
 
-### Why Multi-Agent
-Some tasks are too complex for a single orchestrator turn — research tasks, multi-step workflows, tasks requiring parallel information gathering. A multi-agent approach lets coda spawn specialized sub-agents.
+> **Status:** Implemented. See `plans/subagent-system.md` for full documentation.
 
-### Agent Types
-- [ ] **Research Agent**: autonomous web/database research
-  - Given a topic, gathers information from multiple sources
-  - Returns a structured report
-  - Use case: "Research the latest on [CVE/topic/product]"
-- [ ] **Workflow Agent**: multi-step task execution
-  - Chains multiple skill calls in sequence with decision points
-  - Use case: "Check if I have any meetings tomorrow and if not, schedule a movie night"
-- [ ] **Analysis Agent**: data analysis and summarization
-  - Processes large datasets from skills (network logs, email archives)
-  - Use case: "Analyze my network traffic patterns over the last week"
+The sub-agent system is live with both synchronous (`delegate_to_subagent`) and asynchronous (`sessions_spawn`) delegation modes, a `BaseAgent` abstraction, and comprehensive security controls.
 
-### Implementation
-- [ ] `AgentSpawner` class in orchestrator:
-  - Main orchestrator decides when to spawn a sub-agent
-  - Sub-agents get a scoped subset of tools and a focused system prompt
-  - Sub-agents report back to the main orchestrator
-  - Max concurrent sub-agents: 3 (configurable)
-  - Sub-agent timeout: 5 minutes (configurable)
-- [ ] Sub-agent isolation:
-  - Separate conversation context (doesn't pollute main history)
-  - Scoped tool access (research agent can't control Plex)
-  - Token budget per sub-agent
+### What Was Built
+- [x] `BaseAgent` class (`src/core/base-agent.ts`) — unified agentic loop for both main agent and sub-agents
+- [x] `SubagentManager` (`src/core/subagent-manager.ts`) — lifecycle management: spawn, track, timeout, cancel, cleanup
+- [x] `SubagentSkill` (`src/skills/subagents/skill.ts`) — 7 LLM tools for delegation and management
+- [x] `mainAgentOnly` flag on `SkillToolDefinition` — declarative tool scoping for sub-agents
+- [x] Recursive spawn prevention (two layers: declarative + runtime guard)
+- [x] User isolation, output sanitization, rate limiting, concurrency limits
+- [x] Discord `/subagents` slash command (list, stop, log, info, send)
+- [x] Event bus integration (spawned, running, completed, failed, timeout, cancelled)
+- [x] Database schema for persistent audit trail (`subagent_runs` table)
+- [x] Configurable limits (timeout, concurrency, token budget, rate limits)
 
-### Agent-to-Agent Communication
-- [ ] Sub-agents communicate results back via structured response format
-- [ ] Main orchestrator synthesizes sub-agent results into user response
-- [ ] Event bus used for async agent coordination:
-  - `agent.task.started`, `agent.task.progress`, `agent.task.completed`
-
-### User Visibility
-- [ ] Show sub-agent status in Discord/Slack: "Researching... (checking 3 sources)"
-- [ ] Progress updates for long-running tasks
-- [ ] User can cancel sub-agent tasks
+### Original Concepts Addressed
+- [x] **Research/Workflow/Analysis agents**: Handled generically — any task can be delegated with scoped tools. Named agent types deferred to a future Critic/Reviewer workflow.
+- [x] **Sub-agent isolation**: Fresh `BaseAgent` instance per run with separate context and scoped tools.
+- [x] **Agent-to-agent communication**: Results returned via sanitized output (sync) or announced via callback (async). Events published throughout lifecycle.
+- [x] **User visibility**: `/subagents list` and `sessions_list` show status. `/subagents log` shows transcript. Async results announced to channel.
+- [x] **Cancellation**: `/subagents stop` and `sessions_stop` abort running agents via `AbortController`.
 
 ---
 
@@ -259,15 +244,14 @@ Gate-tier tests must pass. Run with `npm run test:phase7`.
 - [ ] TTS converts response text to audio buffer
 - [ ] Voice responses are shorter than equivalent text responses (system prompt hint)
 
-**Multi-Agent (`tests/unit/core/agents.test.ts`)**
-- [ ] `AgentSpawner` creates sub-agent with scoped tools
-- [ ] Sub-agent cannot access tools outside its scope
-- [ ] Sub-agent respects token budget
-- [ ] Sub-agent respects timeout (5 minutes)
-- [ ] Max concurrent sub-agents limit is enforced
-- [ ] Sub-agent results are returned to main orchestrator
-- [ ] Sub-agent failure is handled gracefully (doesn't crash orchestrator)
-- [ ] User cancellation stops sub-agent execution
+**Multi-Agent — IMPLEMENTED (76+ tests across 5 files)**
+- [x] `BaseAgent` unit tests (`tests/unit/core/base-agent.test.ts`, 13 tests)
+- [x] `SubagentManager` unit tests (`tests/unit/core/subagent-manager.test.ts`, 28 tests)
+- [x] `SubagentSkill` unit tests (`tests/unit/skills/subagents/skill.test.ts`, 17 tests)
+- [x] Lifecycle integration tests (`tests/integration/subagent-lifecycle.test.ts`, 8 tests)
+- [x] Security integration tests (`tests/integration/subagent-security.test.ts`, 10 tests)
+- [x] Registry filtering tests (`tests/unit/skills/registry.test.ts`, +4 tests)
+- [x] Sanitizer tests (`tests/unit/core/sanitizer.test.ts`, +3 tests)
 
 **Local LLM Fallback (`tests/unit/core/llm-fallback.test.ts`)**
 - [ ] Fallback triggers after all cloud providers in failover chain are unavailable
@@ -294,11 +278,20 @@ Gate-tier tests must pass. Run with `npm run test:phase7`.
 - [ ] Alert fires → WebSocket client receives push notification
 - [ ] Pairing flow: generate code → exchange for JWT → use JWT for requests
 
-**Multi-Agent Workflow (`tests/integration/multi-agent.test.ts`)**
-- [ ] Research agent: given topic → gathers info from browser skill → returns report
-- [ ] Workflow agent: checks calendar → makes decision → executes action
-- [ ] Progress updates are sent to interface during long-running agent tasks
-- [ ] User cancellation propagates and stops active agents
+**Multi-Agent Workflow — IMPLEMENTED**
+- [x] Async spawn + list + info lifecycle (`tests/integration/subagent-lifecycle.test.ts`)
+- [x] Spawn + stop cancellation with event verification
+- [x] Sync delegation returns sanitized result
+- [x] Multiple concurrent spawns within limits
+- [x] Tool registration and scoping via SubagentSkill
+- [x] Announce callback on async completion
+- [x] Events published throughout lifecycle
+- [x] Recursive spawn prevention (`tests/integration/subagent-security.test.ts`)
+- [x] User isolation (cross-user access denied)
+- [x] Injection sanitization
+- [x] Rate limiting enforcement
+- [x] `mainAgentOnly` enforcement
+- [x] Concurrency limit enforcement
 
 **LLM Failover (`tests/integration/llm-failover.test.ts`)**
 - [ ] All cloud providers go down → system switches to local Ollama within 30s

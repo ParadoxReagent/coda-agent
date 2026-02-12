@@ -72,6 +72,7 @@ export class CalendarSkill implements Skill {
           required: ["title", "start_time", "end_time"],
         },
         requiresConfirmation: true,
+        mainAgentOnly: true,
       },
       {
         name: "calendar_search",

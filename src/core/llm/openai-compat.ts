@@ -123,10 +123,16 @@ export class OpenAICompatProvider implements LLMProvider {
 
     if (message?.tool_calls) {
       for (const tc of message.tool_calls) {
+        let input: Record<string, unknown>;
+        try {
+          input = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+        } catch {
+          input = {};
+        }
         toolCalls.push({
           id: tc.id,
           name: tc.function.name,
-          input: JSON.parse(tc.function.arguments),
+          input,
         });
       }
     }

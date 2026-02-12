@@ -1,4 +1,4 @@
-# Subagents
+# Subagents - done?
 
 Sub-agents let you run background tasks without blocking the main conversation. When you spawn a sub-agent, it runs in its own isolated session, does its work, and announces the result back to the chat when finished.
 Use cases:
@@ -53,7 +53,7 @@ If the same skill name exists in more than one place, the usual precedence appli
 
 Session snapshot (performance)
 
-OpenClaw snapshots the eligible skills when a session starts and reuses that list for subsequent turns in the same session. Changes to skills or config take effect on the next new session.
+What about snapshots the eligible skills when a session starts and reuses that list for subsequent turns in the same session. Changes to skills or config take effect on the next new session.
 Skills can also refresh mid-session when the skills watcher is enabled or when a new eligible remote node appears (see below). Think of this as a hot reload: the refreshed list is picked up on the next agent turn.
 --------------
 

@@ -14,6 +14,7 @@ import type { ProviderManager } from "../core/llm/manager.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { Logger } from "../utils/logger.js";
 import type { PreferencesManager } from "../core/preferences.js";
+import type { SubagentManager } from "../core/subagent-manager.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -39,6 +40,7 @@ export class DiscordBot {
   private logger: Logger;
   private allowedUserIds: Set<string>;
   private preferences?: PreferencesManager;
+  private subagentManager?: SubagentManager;
 
   constructor(
     config: DiscordBotConfig,
@@ -46,7 +48,8 @@ export class DiscordBot {
     providerManager: ProviderManager,
     skills: SkillRegistry,
     logger: Logger,
-    preferences?: PreferencesManager
+    preferences?: PreferencesManager,
+    subagentManager?: SubagentManager
   ) {
     this.config = config;
     this.orchestrator = orchestrator;
@@ -55,6 +58,7 @@ export class DiscordBot {
     this.logger = logger;
     this.allowedUserIds = new Set(config.allowedUserIds);
     this.preferences = preferences;
+    this.subagentManager = subagentManager;
 
     this.client = new Client({
       intents: [
@@ -238,6 +242,16 @@ export class DiscordBot {
         }
         break;
       }
+
+      case "subagents": {
+        if (!this.subagentManager) {
+          await interaction.reply({ content: "Subagents are not available.", ephemeral: true });
+          break;
+        }
+        const subcommand = interaction.options.getSubcommand();
+        await this.handleSubagentsCommand(interaction, subcommand);
+        break;
+      }
     }
   }
 
@@ -309,6 +323,116 @@ export class DiscordBot {
     }
   }
 
+  private async handleSubagentsCommand(
+    interaction: ChatInputCommandInteraction,
+    subcommand: string
+  ): Promise<void> {
+    const userId = interaction.user.id;
+
+    switch (subcommand) {
+      case "list": {
+        const runs = this.subagentManager!.listRuns(userId);
+        if (runs.length === 0) {
+          await interaction.reply("No active sub-agent runs.");
+          return;
+        }
+        const lines = runs.map(
+          (r) =>
+            `\`${r.id.slice(0, 8)}\` | ${r.status} | ${r.mode} | ${r.task.slice(0, 60)}`
+        );
+        await interaction.reply(
+          `**Active Sub-agents**\n${lines.join("\n")}`
+        );
+        break;
+      }
+
+      case "stop": {
+        const runId = interaction.options.getString("run_id");
+        if (!runId) {
+          await interaction.reply("Please provide a run ID.");
+          return;
+        }
+        try {
+          const stopped = await this.subagentManager!.stopRun(userId, runId);
+          await interaction.reply(
+            stopped
+              ? `Sub-agent \`${runId.slice(0, 8)}\` stopped.`
+              : `No active run found with ID \`${runId.slice(0, 8)}\`.`
+          );
+        } catch (err) {
+          await interaction.reply(
+            `Error: ${err instanceof Error ? err.message : "Unknown error"}`
+          );
+        }
+        break;
+      }
+
+      case "log": {
+        const runId = interaction.options.getString("run_id");
+        if (!runId) {
+          await interaction.reply("Please provide a run ID.");
+          return;
+        }
+        const transcript = this.subagentManager!.getRunLog(userId, runId);
+        if (!transcript) {
+          await interaction.reply(
+            `No run found with ID \`${runId.slice(0, 8)}\` or access denied.`
+          );
+          return;
+        }
+        if (transcript.length === 0) {
+          await interaction.reply("No transcript entries yet.");
+          return;
+        }
+        const entries = transcript
+          .slice(-10)
+          .map(
+            (t) =>
+              `[${t.role}${t.toolName ? ` (${t.toolName})` : ""}] ${t.content.slice(0, 200)}`
+          );
+        await interaction.reply(
+          `**Transcript** (last ${entries.length} entries)\n\`\`\`\n${entries.join("\n")}\n\`\`\``
+        );
+        break;
+      }
+
+      case "info": {
+        const runId = interaction.options.getString("run_id");
+        if (!runId) {
+          await interaction.reply("Please provide a run ID.");
+          return;
+        }
+        const info = this.subagentManager!.getRunInfo(userId, runId);
+        if (!info) {
+          await interaction.reply(
+            `No run found with ID \`${runId.slice(0, 8)}\` or access denied.`
+          );
+          return;
+        }
+        await interaction.reply(
+          `**Sub-agent Info**\nID: \`${info.id}\`\nStatus: ${info.status}\nMode: ${info.mode}\nTask: ${info.task.slice(0, 200)}\nModel: ${info.model ?? "default"}\nTokens: ${info.inputTokens} in / ${info.outputTokens} out\nTool calls: ${info.toolCallCount}\nCreated: ${info.createdAt.toISOString()}`
+        );
+        break;
+      }
+
+      case "send": {
+        const runId = interaction.options.getString("run_id");
+        const message = interaction.options.getString("message");
+        if (!runId || !message) {
+          await interaction.reply("Please provide both a run ID and a message.");
+          return;
+        }
+        const sent = this.subagentManager!.sendToRun(userId, runId, message);
+        await interaction.reply(
+          sent
+            ? `Message sent to sub-agent \`${runId.slice(0, 8)}\`.`
+            : `Could not send message: run not found, not running, or access denied.`
+        );
+        break;
+      }
+    }
+  }
+
   private async registerSlashCommands(): Promise<void> {
     const commands = [
       new SlashCommandBuilder()
@@ -374,6 +498,63 @@ export class DiscordBot {
             .setName("end")
             .setDescription("Quiet hours end time (HH:MM)")
             .setRequired(false)
+        ),
+
+      new SlashCommandBuilder()
+        .setName("subagents")
+        .setDescription("Manage sub-agent runs")
+        .addSubcommand((sub) =>
+          sub.setName("list").setDescription("List active sub-agent runs")
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("stop")
+            .setDescription("Stop a running sub-agent")
+            .addStringOption((opt) =>
+              opt
+                .setName("run_id")
+                .setDescription("Run ID to stop")
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("log")
+            .setDescription("View sub-agent execution transcript")
+            .addStringOption((opt) =>
+              opt
+                .setName("run_id")
+                .setDescription("Run ID to view logs for")
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("info")
+            .setDescription("View sub-agent run details")
+            .addStringOption((opt) =>
+              opt
+                .setName("run_id")
+                .setDescription("Run ID to get info for")
+                .setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("send")
+            .setDescription("Send a message to a running sub-agent")
+            .addStringOption((opt) =>
+              opt
+                .setName("run_id")
+                .setDescription("Run ID to message")
+                .setRequired(true)
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName("message")
+                .setDescription("Message to send")
+                .setRequired(true)
+            )
         ),
     ];
 

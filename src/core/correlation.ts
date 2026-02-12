@@ -9,6 +9,7 @@ export interface RequestContext {
   correlationId: string;
   userId?: string;
   channel?: string;
+  subagentRunId?: string;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();

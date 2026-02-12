@@ -50,6 +50,7 @@ export class SchedulerSkill implements Skill {
           required: ["task_name", "enabled"],
         },
         requiresConfirmation: true,
+        mainAgentOnly: true,
       },
     ];
   }

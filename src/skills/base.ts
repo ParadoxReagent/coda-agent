@@ -9,6 +9,8 @@ import type { SkillContext } from "./context.js";
 export interface SkillToolDefinition extends LLMToolDefinition {
   /** If true, the skill executor requires user confirmation before executing. */
   requiresConfirmation?: boolean;
+  /** If true, this tool is excluded from subagent tool lists. */
+  mainAgentOnly?: boolean;
 }
 
 /** The contract every skill must implement. */

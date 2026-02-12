@@ -742,6 +742,8 @@ coda/
 │   ├── main.ts                  # Entry point
 │   ├── core/
 │   │   ├── orchestrator.ts      # Agent loop — provider-agnostic
+│   │   ├── base-agent.ts        # Unified agentic loop (main + subagents)
+│   │   ├── subagent-manager.ts  # Subagent lifecycle management
 │   │   ├── context.ts           # Conversation context management
 │   │   ├── events.ts            # Event bus (Redis Streams)
 │   │   ├── alerts.ts            # Alert router
@@ -763,6 +765,7 @@ coda/
 │   │   ├── unifi/
 │   │   ├── reminders/
 │   │   ├── notes/               # Knowledge base / persistent memory
+│   │   ├── subagents/           # Sub-agent delegation skill
 │   │   ├── browser/             # Playwright-based automation
 │   │   ├── search/              # Web search (SearXNG / Tavily)
 │   │   ├── ha/                  # Home Assistant
@@ -823,7 +826,7 @@ coda/
 | **iOS App** | Native Swift app connecting via Tailscale | REST API + push notifications via APNs |
 | **Voice Interface** | Whisper STT + Piper TTS for hands-free | Local whisper.cpp or API |
 | **Proactive Research** | Autonomous research tasks | Careful scoping needed |
-| **Multi-agent** | Spawn sub-agents for complex tasks | Agent-to-agent coordination |
+| **Multi-agent** | Spawn sub-agents for complex tasks | **Implemented** — see `plans/subagent-system.md` |
 | **Local LLM Fallback** | Use a local model if cloud LLM APIs are down | Ollama via existing provider abstraction |
 
 ---

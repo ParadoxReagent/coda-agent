@@ -144,6 +144,24 @@ const SchedulerConfigSchema = z.object({
   })).default({}),
 });
 
+const SubagentConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  default_timeout_minutes: z.number().default(5),
+  max_timeout_minutes: z.number().default(10),
+  sync_timeout_seconds: z.number().default(120),
+  max_concurrent_per_user: z.number().default(3),
+  max_concurrent_global: z.number().default(10),
+  archive_ttl_minutes: z.number().default(60),
+  max_tool_calls_per_run: z.number().default(25),
+  default_token_budget: z.number().default(50000),
+  max_token_budget: z.number().default(200000),
+  spawn_rate_limit: z.object({
+    max_requests: z.number().default(10),
+    window_seconds: z.number().default(3600),
+  }).default({}),
+  cleanup_interval_seconds: z.number().default(60),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -170,9 +188,11 @@ const AppConfigSchema = z.object({
   memory: MemoryConfigSchema.optional(),
   alerts: AlertsConfigSchema.optional(),
   scheduler: SchedulerConfigSchema.optional(),
+  subagents: SubagentConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderCapabilitiesConfig = z.infer<typeof ProviderCapabilitiesSchema>;
 

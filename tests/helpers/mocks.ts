@@ -10,6 +10,8 @@ import type { EventBus, CodaEvent } from "../../src/core/events.js";
 import type { Logger } from "../../src/utils/logger.js";
 import type { RateLimitResult } from "../../src/core/rate-limiter.js";
 import type { SkillHealthTracker, SkillHealth } from "../../src/core/skill-health.js";
+import type { BaseAgentConfig, AgentRunResult, TranscriptEntry } from "../../src/core/base-agent.js";
+import type { SubagentManager, SubagentRunRecord } from "../../src/core/subagent-manager.js";
 import { vi } from "vitest";
 
 // ---- Mock Logger ----
@@ -336,6 +338,69 @@ export function createMockSlackApp() {
       chat: { postMessage: vi.fn().mockResolvedValue(undefined) },
     },
     _messageHandlers: messageHandlers,
+  };
+}
+
+// ---- Mock SubagentManager ----
+export function createMockSubagentManager(): {
+  spawn: ReturnType<typeof vi.fn>;
+  delegateSync: ReturnType<typeof vi.fn>;
+  stopRun: ReturnType<typeof vi.fn>;
+  listRuns: ReturnType<typeof vi.fn>;
+  getRunLog: ReturnType<typeof vi.fn>;
+  getRunInfo: ReturnType<typeof vi.fn>;
+  sendToRun: ReturnType<typeof vi.fn>;
+  getActiveRunCount: ReturnType<typeof vi.fn>;
+  getTotalActiveRunCount: ReturnType<typeof vi.fn>;
+  setAnnounceCallback: ReturnType<typeof vi.fn>;
+  startup: ReturnType<typeof vi.fn>;
+  shutdown: ReturnType<typeof vi.fn>;
+} {
+  return {
+    spawn: vi.fn(async () => ({ status: "accepted" as const, runId: "mock-run-id" })),
+    delegateSync: vi.fn(async () => "Mock delegation result"),
+    stopRun: vi.fn(async () => true),
+    listRuns: vi.fn(() => []),
+    getRunLog: vi.fn(() => []),
+    getRunInfo: vi.fn(() => null),
+    sendToRun: vi.fn(() => true),
+    getActiveRunCount: vi.fn(() => 0),
+    getTotalActiveRunCount: vi.fn(() => 0),
+    setAnnounceCallback: vi.fn(),
+    startup: vi.fn(),
+    shutdown: vi.fn(async () => {}),
+  };
+}
+
+// ---- Mock BaseAgent Result ----
+export function createMockAgentRunResult(overrides?: Partial<AgentRunResult>): AgentRunResult {
+  return {
+    text: "Mock agent result",
+    totalTokens: { input: 100, output: 50 },
+    toolCallCount: 0,
+    transcript: [],
+    ...overrides,
+  };
+}
+
+// ---- Subagent Run Fixture ----
+export function createSubagentRunFixture(overrides?: Partial<SubagentRunRecord>): SubagentRunRecord {
+  return {
+    id: "test-run-" + crypto.randomUUID().slice(0, 8),
+    userId: "user-123",
+    channel: "discord",
+    parentRunId: null,
+    task: "Test task",
+    status: "accepted",
+    mode: "async",
+    inputTokens: 0,
+    outputTokens: 0,
+    toolCallCount: 0,
+    timeoutMs: 300000,
+    transcript: [],
+    metadata: {},
+    createdAt: new Date(),
+    ...overrides,
   };
 }
 

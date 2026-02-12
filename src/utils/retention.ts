@@ -54,4 +54,13 @@ export const RETENTION = {
 
   /** Memory context cache TTL in seconds (5 minutes) */
   MEMORY_CONTEXT_CACHE: 300,
+
+  /** Subagent archive TTL in seconds (60 minutes) — after completion, result stays in-memory */
+  SUBAGENT_ARCHIVE_TTL: 3_600,
+
+  /** Max transcript entries stored per subagent run */
+  SUBAGENT_MAX_TRANSCRIPT_ENTRIES: 100,
+
+  /** Subagent run DB row retention in seconds (30 days) */
+  SUBAGENT_RUN_RETENTION: 30 * 24 * 60 * 60,
 } as const;

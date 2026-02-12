@@ -132,6 +132,69 @@ describe("SkillRegistry", () => {
     expect(registry.toolRequiresConfirmation("safe_action")).toBe(false);
   });
 
+  describe("getToolDefinitions filtering", () => {
+    it("filters by allowedSkills", () => {
+      const emailSkill = createMockSkill({
+        name: "email",
+        tools: [{ name: "email_check", description: "Check", input_schema: { type: "object", properties: {} } }],
+      });
+      const notesSkill = createMockSkill({
+        name: "notes",
+        tools: [{ name: "note_search", description: "Search", input_schema: { type: "object", properties: {} } }],
+      });
+      registry.register(emailSkill);
+      registry.register(notesSkill);
+
+      const tools = registry.getToolDefinitions({ allowedSkills: ["notes"] });
+      expect(tools.map((t) => t.name)).toContain("note_search");
+      expect(tools.map((t) => t.name)).not.toContain("email_check");
+    });
+
+    it("filters by blockedTools", () => {
+      const skill = createMockSkill({
+        name: "notes",
+        tools: [
+          { name: "note_search", description: "Search", input_schema: { type: "object", properties: {} } },
+          { name: "note_save", description: "Save", input_schema: { type: "object", properties: {} } },
+        ],
+      });
+      registry.register(skill);
+
+      const tools = registry.getToolDefinitions({ blockedTools: ["note_save"] });
+      expect(tools.map((t) => t.name)).toContain("note_search");
+      expect(tools.map((t) => t.name)).not.toContain("note_save");
+    });
+
+    it("excludes mainAgentOnly tools when excludeMainAgentOnly is true", () => {
+      const skill = createMockSkill({
+        name: "subagents",
+        tools: [
+          { name: "sessions_spawn", description: "Spawn", input_schema: { type: "object", properties: {} }, mainAgentOnly: true },
+          { name: "sessions_list", description: "List", input_schema: { type: "object", properties: {} } },
+        ],
+      });
+      registry.register(skill);
+
+      const tools = registry.getToolDefinitions({ excludeMainAgentOnly: true });
+      expect(tools.map((t) => t.name)).not.toContain("sessions_spawn");
+      expect(tools.map((t) => t.name)).toContain("sessions_list");
+    });
+
+    it("includes all tools when no filtering options are provided", () => {
+      const skill = createMockSkill({
+        name: "test",
+        tools: [
+          { name: "tool_a", description: "A", input_schema: { type: "object", properties: {} }, mainAgentOnly: true },
+          { name: "tool_b", description: "B", input_schema: { type: "object", properties: {} } },
+        ],
+      });
+      registry.register(skill);
+
+      const tools = registry.getToolDefinitions();
+      expect(tools).toHaveLength(2);
+    });
+  });
+
   it("listSkills returns all registered skills", () => {
     registry.register(createMockSkill({ name: "email", description: "Email skill" }));
     registry.register(createMockSkill({ name: "plex", description: "Plex skill" }));

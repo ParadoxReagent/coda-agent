@@ -158,6 +158,23 @@ skills:
 #     timezone: "America/New_York"
 #     override_severities: ["high"]
 
+# Sub-agent configuration
+# subagents:
+#   enabled: true
+#   default_timeout_minutes: 5
+#   max_timeout_minutes: 10
+#   sync_timeout_seconds: 120
+#   max_concurrent_per_user: 3
+#   max_concurrent_global: 10
+#   archive_ttl_minutes: 60
+#   max_tool_calls_per_run: 25
+#   default_token_budget: 50000
+#   max_token_budget: 200000
+#   spawn_rate_limit:
+#     max_requests: 10
+#     window_seconds: 3600
+#   cleanup_interval_seconds: 60
+
 # Scheduler configuration (override built-in task schedules)
 # scheduler:
 #   tasks:
