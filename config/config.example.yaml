@@ -182,6 +182,42 @@ skills:
 #     window_seconds: 3600
 #   cleanup_interval_seconds: 60
 
+# Firecrawl — web scraping, crawling, URL mapping, and search
+# Supports both Firecrawl Cloud (api_key required) and self-hosted instances.
+# Env overrides: FIRECRAWL_API_KEY, FIRECRAWL_API_URL
+#
+# Cloud usage (default):
+# firecrawl:
+#   api_key: "fc-..."                  # or set FIRECRAWL_API_KEY env var
+#
+# Self-hosted:
+# firecrawl:
+#   api_url: "http://localhost:3002"   # no api_key needed for self-hosted
+#
+# Full options:
+# firecrawl:
+#   api_key: "fc-..."
+#   api_url: "https://api.firecrawl.dev"     # default; change for self-hosted
+#   defaults:
+#     only_main_content: true                # strip nav/footer from scrapes
+#     output_format: "markdown"              # "markdown" or "html"
+#     timeout_ms: 30000                      # per-request timeout
+#     max_content_length: 50000              # truncate content beyond this (bytes)
+#   rate_limit:
+#     max_requests: 30                       # requests per window
+#     window_seconds: 60                     # rate limit window
+#   cache_ttl_seconds: 3600                  # cache scrape/search results (1 hour)
+#
+# Available tools (once enabled):
+#   firecrawl_scrape        — Scrape a single URL → clean markdown
+#   firecrawl_crawl         — Start async website crawl (returns job ID)
+#   firecrawl_crawl_status  — Poll crawl job for progress/results
+#   firecrawl_map           — Discover all URLs on a site
+#   firecrawl_search        — Web search with content extraction
+#
+# Agent skill: activate "web-research" via skill_activate for guided
+# research strategies (quick facts, docs exploration, deep research).
+
 # Scheduler configuration (override built-in task schedules)
 # scheduler:
 #   tasks:

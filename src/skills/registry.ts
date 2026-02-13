@@ -18,6 +18,7 @@ const DEFAULT_SKILL_RATE_LIMITS: Record<string, { maxRequests: number; windowSec
   reminders: { maxRequests: 50, windowSeconds: 3600 },
   n8n: { maxRequests: 100, windowSeconds: 3600 },
   memory: { maxRequests: 100, windowSeconds: 3600 },
+  firecrawl: { maxRequests: 30, windowSeconds: 60 },
 };
 
 export class SkillRegistry {
@@ -218,7 +219,7 @@ export class SkillRegistry {
 
   private isInternalSkill(skillName: string): boolean {
     const internalSkills = new Set([
-      "notes", "reminders", "calendar", "email", "scheduler", "n8n", "memory",
+      "notes", "reminders", "calendar", "email", "scheduler", "n8n", "memory", "firecrawl",
     ]);
     return internalSkills.has(skillName);
   }

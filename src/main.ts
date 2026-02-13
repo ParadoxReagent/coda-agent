@@ -28,6 +28,7 @@ import { EmailSkill } from "./integrations/email/skill.js";
 import { SchedulerSkill } from "./skills/scheduler/skill.js";
 import { N8nSkill } from "./integrations/n8n/skill.js";
 import { MemorySkill } from "./skills/memory/skill.js";
+import { FirecrawlSkill } from "./integrations/firecrawl/skill.js";
 import { SubagentSkill } from "./skills/subagents/skill.js";
 import { AgentSkillDiscovery } from "./skills/agent-skill-discovery.js";
 import { AgentSkillsSkill } from "./skills/agent-skills/skill.js";
@@ -49,6 +50,7 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
     calendar: config.calendar,
     email: config.email,
     memory: config.memory,
+    firecrawl: config.firecrawl,
     n8n: {},
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
@@ -184,6 +186,15 @@ async function main() {
     }
   }
 
+  // Firecrawl registers conditionally (requires config or env var)
+  if (config.firecrawl) {
+    try {
+      skillRegistry.register(new FirecrawlSkill(), config.firecrawl);
+    } catch (err) {
+      logger.warn({ error: err }, "Firecrawl skill not registered — missing config");
+    }
+  }
+
   // 6b. Register subagent skill (tools registered now, manager wired after orchestrator)
   const subagentSkill = new SubagentSkill();
   skillRegistry.register(subagentSkill);
@@ -213,10 +224,16 @@ async function main() {
   }
 
   // 7b. Agent Skills (agentskills.io standard)
-  let agentSkillDiscovery: AgentSkillDiscovery | undefined;
-  if (config.skills.agent_skill_dirs.length > 0) {
-    agentSkillDiscovery = new AgentSkillDiscovery(logger);
-    agentSkillDiscovery.scanDirectories(config.skills.agent_skill_dirs);
+  // Always include built-in agent-skills directory alongside any user-configured dirs.
+  // In dev: src/skills/agent-skills/  In prod: dist/skills/agent-skills/
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const builtinAgentSkillsDir = join(__dirname, "skills", "agent-skills");
+  const agentSkillDirs = [builtinAgentSkillsDir, ...config.skills.agent_skill_dirs];
+
+  const agentSkillDiscovery = new AgentSkillDiscovery(logger);
+  agentSkillDiscovery.scanDirectories(agentSkillDirs);
+
+  if (agentSkillDiscovery.getSkillMetadataList().length > 0) {
     skillRegistry.register(new AgentSkillsSkill(agentSkillDiscovery));
   }
 

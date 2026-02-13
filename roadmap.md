@@ -43,14 +43,6 @@ https://github.com/anthropics/skills/tree/main/skills
 
 https://agentskills.io/home
 
-Per-agent vs shared skills
-
-In multi-agent setups, each agent has its own workspace. That means:
-Per-agent skills live in <workspace>/skills for that agent only.
-Shared skills live in ~/.openclaw/skills (managed/local) and are visible to all agents on the same machine.
-Shared folders can also be added via skills.load.extraDirs (lowest precedence) if you want a common skills pack used by multiple agents.
-If the same skill name exists in more than one place, the usual precedence applies: workspace wins, then managed/local, then bundled.
-
 Session snapshot (performance)
 
 What about snapshots the eligible skills when a session starts and reuses that list for subsequent turns in the same session. Changes to skills or config take effect on the next new session.
@@ -128,7 +120,7 @@ https://prompt.security/clawsec
 
 
 ------------------
-
+Skills/integrations
 stock checker?
 self-repair/doctor?
 self improving?
@@ -136,10 +128,8 @@ ask user what LLM in cli while starting
 ask for apis
 ask for discord things?
 slack things?
-firecrawl
 
-Clean way for users to enable skills without modifying config and rebuilding
-
+----------
 CHECK FOR SECURTIY !!!!!!
 https://genai.owasp.org/llm-top-10/
 

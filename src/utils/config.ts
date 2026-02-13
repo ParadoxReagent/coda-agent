@@ -138,6 +138,25 @@ const MemoryConfigSchema = z.object({
   }).default({}),
 });
 
+const FirecrawlConfigSchema = z.object({
+  api_key: z.string().optional(),
+  api_url: z.string().default("https://api.firecrawl.dev"),
+  defaults: z.object({
+    only_main_content: z.boolean().default(true),
+    output_format: z.enum(["markdown", "html"]).default("markdown"),
+    timeout_ms: z.number().default(30000),
+    max_content_length: z.number().default(50000),
+  }).default({}),
+  rate_limit: z.object({
+    max_requests: z.number().default(30),
+    window_seconds: z.number().default(60),
+  }).default({}),
+  cache_ttl_seconds: z.number().default(3600),
+}).refine(
+  (data) => data.api_key || data.api_url !== "https://api.firecrawl.dev",
+  { message: "api_key is required when using Firecrawl Cloud (default api_url)" }
+);
+
 const SchedulerConfigSchema = z.object({
   tasks: z.record(z.object({
     cron: z.string(),
@@ -190,10 +209,12 @@ const AppConfigSchema = z.object({
   alerts: AlertsConfigSchema.optional(),
   scheduler: SchedulerConfigSchema.optional(),
   subagents: SubagentConfigSchema.optional(),
+  firecrawl: FirecrawlConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
+export type FirecrawlConfig = z.infer<typeof FirecrawlConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderCapabilitiesConfig = z.infer<typeof ProviderCapabilitiesSchema>;
 
@@ -305,6 +326,13 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     const memory = ensureObject(config, "memory");
     memory.api_key = process.env.MEMORY_API_KEY;
     if (process.env.MEMORY_SERVICE_URL) memory.base_url = process.env.MEMORY_SERVICE_URL;
+  }
+
+  // Firecrawl overrides
+  if (process.env.FIRECRAWL_API_KEY) {
+    const firecrawl = ensureObject(config, "firecrawl");
+    firecrawl.api_key = process.env.FIRECRAWL_API_KEY;
+    if (process.env.FIRECRAWL_API_URL) firecrawl.api_url = process.env.FIRECRAWL_API_URL;
   }
 
   // CalDAV / Calendar overrides

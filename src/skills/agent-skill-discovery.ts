@@ -34,6 +34,7 @@ export class AgentSkillDiscovery {
   private skills = new Map<string, AgentSkillMetadata>();
   private activated = new Set<string>();
   private logger: Logger;
+  private scannedDirs: string[] = [];
 
   constructor(logger: Logger) {
     this.logger = logger;
@@ -44,6 +45,7 @@ export class AgentSkillDiscovery {
    * Each valid subdirectory is registered as an agent skill.
    */
   scanDirectories(dirs: string[]): void {
+    this.scannedDirs = dirs;
     for (const raw of dirs) {
       const dir = resolve(raw.replace(/^~/, homedir()));
 

@@ -23,6 +23,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/dist ./dist
 COPY src/db/migrations ./db/migrations
+COPY src/skills/agent-skills/ ./dist/skills/agent-skills/
 
 ENV NODE_ENV=production
 EXPOSE 3000
