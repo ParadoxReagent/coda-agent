@@ -1,5 +1,5 @@
 import type { LLMResponse, LLMToolCall } from "../../src/core/llm/provider.js";
-import type { EmailMetadata } from "../../src/skills/email/types.js";
+import type { EmailMetadata } from "../../src/integrations/email/types.js";
 import type { MockCalendarEvent } from "./mocks.js";
 import type { UserPrefs } from "../../src/core/preferences.js";
 

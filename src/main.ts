@@ -23,16 +23,20 @@ import { initializeDatabase } from "./db/connection.js";
 import { runMigrations } from "./db/migrate.js";
 import { NotesSkill } from "./skills/notes/skill.js";
 import { ReminderSkill } from "./skills/reminders/skill.js";
-import { CalendarSkill } from "./skills/calendar/skill.js";
-import { EmailSkill } from "./skills/email/skill.js";
+import { CalendarSkill } from "./integrations/calendar/skill.js";
+import { EmailSkill } from "./integrations/email/skill.js";
 import { SchedulerSkill } from "./skills/scheduler/skill.js";
-import { N8nSkill } from "./skills/n8n/skill.js";
+import { N8nSkill } from "./integrations/n8n/skill.js";
 import { MemorySkill } from "./skills/memory/skill.js";
 import { SubagentSkill } from "./skills/subagents/skill.js";
+import { AgentSkillDiscovery } from "./skills/agent-skill-discovery.js";
+import { AgentSkillsSkill } from "./skills/agent-skills/skill.js";
 import { SubagentManager } from "./core/subagent-manager.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import Redis from "ioredis";
 
 const logger = createLogger();
@@ -208,6 +212,14 @@ async function main() {
     }
   }
 
+  // 7b. Agent Skills (agentskills.io standard)
+  let agentSkillDiscovery: AgentSkillDiscovery | undefined;
+  if (config.skills.agent_skill_dirs.length > 0) {
+    agentSkillDiscovery = new AgentSkillDiscovery(logger);
+    agentSkillDiscovery.scanDirectories(config.skills.agent_skill_dirs);
+    skillRegistry.register(new AgentSkillsSkill(agentSkillDiscovery));
+  }
+
   // 8. Create orchestrator
   const orchestrator = new Orchestrator(
     providerManager,
@@ -215,7 +227,8 @@ async function main() {
     contextStore,
     eventBus,
     confirmationManager,
-    logger
+    logger,
+    agentSkillDiscovery
   );
 
   // 8b. Initialize SubagentManager

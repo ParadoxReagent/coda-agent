@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { EmailPoller } from "../../src/skills/email/poller.js";
+import { EmailPoller } from "../../src/integrations/email/poller.js";
 import {
   createMockEventBus,
   createMockLogger,

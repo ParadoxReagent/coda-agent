@@ -446,3 +446,15 @@ export function createMockDatabase() {
 
   return chain;
 }
+
+// ---- Mock AgentSkillDiscovery ----
+export function createMockAgentSkillDiscovery() {
+  return {
+    scanDirectories: vi.fn(),
+    getSkillMetadataList: vi.fn(() => []),
+    activateSkill: vi.fn((name: string) => `Instructions for ${name}`),
+    isActivated: vi.fn(() => false),
+    listResources: vi.fn(() => []),
+    readResource: vi.fn((_name: string, path: string) => `Content of ${path}`),
+  };
+}

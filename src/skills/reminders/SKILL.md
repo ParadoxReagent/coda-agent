@@ -1,3 +1,8 @@
+---
+name: reminders
+description: "Create, list, complete, and snooze reminders with natural language time parsing and recurring support."
+---
+
 # Reminders Skill
 
 Create, list, complete, and snooze reminders with natural language time parsing and recurring support.

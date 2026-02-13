@@ -40,6 +40,7 @@ const ExternalPolicySchema = z.object({
 const SkillsConfigSchema = z.object({
   external_dirs: z.array(z.string()).default([]),
   external_policy: ExternalPolicySchema.default({}),
+  agent_skill_dirs: z.array(z.string()).default([]),
 });
 
 const DiscordConfigSchema = z.object({

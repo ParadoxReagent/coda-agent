@@ -1,3 +1,8 @@
+---
+name: notes
+description: "Save, search, list, and delete personal notes with full-text search and tagging."
+---
+
 # Notes Skill
 
 Save, search, list, and delete personal notes with full-text search and tagging.

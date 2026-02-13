@@ -123,6 +123,13 @@ skills:
     allowed_local_unsigned_dirs:
       - "./custom-skills"
 
+  # Agent Skills (agentskills.io standard) — instruction-based skills
+  # Scan directories for subdirectories containing SKILL.md files
+  agent_skill_dirs: []
+  # agent_skill_dirs:
+  #   - "./agent-skills"
+  #   - "~/.agent-skills"
+
 # Alerts configuration
 # alerts:
 #   rules:

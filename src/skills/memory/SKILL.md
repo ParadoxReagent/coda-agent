@@ -1,3 +1,8 @@
+---
+name: memory
+description: "Save and retrieve information by meaning using semantic vector embeddings."
+---
+
 # Memory Skill
 
 Save and retrieve information by meaning using semantic vector embeddings.

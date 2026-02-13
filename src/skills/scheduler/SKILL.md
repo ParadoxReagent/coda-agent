@@ -1,3 +1,8 @@
+---
+name: scheduler
+description: "List and manage scheduled background tasks at runtime."
+---
+
 # Scheduler Skill
 
 List and manage scheduled background tasks at runtime. Provides visibility and control over all cron-based tasks registered by other skills.

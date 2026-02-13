@@ -1,5 +1,7 @@
 # Phase 2: MVP Skills — Email, Calendar, Reminders
 
+> **Note:** Email, calendar, and n8n have been moved from `src/skills/` to `src/integrations/` and their tests from `tests/unit/skills/` to `tests/unit/integrations/`. Paths in this document reflect the original plan.
+
 **Timeline:** Week 2
 **Depends on:** Phase 1 (Foundation & Core Engine)
 **Goal:** Deliver the three most universally useful personal assistant skills and wire up the morning briefing workflow.

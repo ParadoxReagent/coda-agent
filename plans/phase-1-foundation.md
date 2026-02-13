@@ -1,4 +1,4 @@
-# Phase 1: Foundation & Core Engine
+# Phase 1: Foundation & Core Engine -----DONE
 
 **Timeline:** Week 1
 **Goal:** Stand up the runtime infrastructure, LLM provider abstraction, and core agent loop so that a user can send a message via Discord and get an LLM-powered response from any configured provider.

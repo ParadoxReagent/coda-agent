@@ -17,6 +17,7 @@ export interface SkillToolDefinition extends LLMToolDefinition {
 export interface Skill {
   readonly name: string;
   readonly description: string;
+  readonly kind?: "skill" | "integration";
 
   /** Return provider-agnostic tool definitions. */
   getTools(): SkillToolDefinition[];

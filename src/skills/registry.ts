@@ -241,10 +241,11 @@ export class SkillRegistry {
   }
 
   /** List all registered skills with their descriptions. */
-  listSkills(): Array<{ name: string; description: string; tools: string[] }> {
+  listSkills(): Array<{ name: string; description: string; kind: string; tools: string[] }> {
     return Array.from(this.skills.values()).map(({ skill, tools }) => ({
       name: skill.name,
       description: skill.description,
+      kind: skill.kind ?? "skill",
       tools: Array.from(tools.keys()),
     }));
   }

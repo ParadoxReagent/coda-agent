@@ -1,5 +1,7 @@
 # n8n Skill Implementation Plan
 
+> **Note:** The n8n skill has been moved from `src/skills/n8n/` to `src/integrations/n8n/`. Paths in this document reflect the original plan.
+
 ## Overview
 
 This plan implements a secure, event-driven integration between n8n workflows and coda-agent. The architecture uses a webhook service to ingest data from n8n, publishes events to coda's event bus, and provides a skill that makes this data available to the LLM for morning briefings and on-demand queries.

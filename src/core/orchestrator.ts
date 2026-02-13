@@ -7,6 +7,7 @@ import type { LLMContentBlock, LLMMessage } from "./llm/provider.js";
 import type { Logger } from "../utils/logger.js";
 import type { NotesSkill } from "../skills/notes/skill.js";
 import type { MemorySkill } from "../skills/memory/skill.js";
+import type { AgentSkillDiscovery } from "../skills/agent-skill-discovery.js";
 import { ResilientExecutor } from "./resilient-executor.js";
 import { withContext, createCorrelationId } from "./correlation.js";
 
@@ -15,14 +16,19 @@ const TOOL_EXECUTION_TIMEOUT_MS = 30_000;
 const MAX_MESSAGE_LENGTH = 4000;
 
 export class Orchestrator {
+  private agentSkillDiscovery?: AgentSkillDiscovery;
+
   constructor(
     private providerManager: ProviderManager,
     private skills: SkillRegistry,
     private context: ContextStore,
     readonly eventBus: EventBus,
     private confirmation: ConfirmationManager,
-    private logger: Logger
-  ) {}
+    private logger: Logger,
+    agentSkillDiscovery?: AgentSkillDiscovery
+  ) {
+    this.agentSkillDiscovery = agentSkillDiscovery;
+  }
 
   async handleMessage(
     userId: string,
@@ -308,10 +314,21 @@ export class Orchestrator {
   }
 
   private async buildSystemPrompt(userId: string, userMessage?: string): Promise<string> {
-    const skillDescriptions = this.skills
-      .listSkills()
-      .map((s) => `- **${s.name}**: ${s.description}`)
-      .join("\n");
+    const allSkills = this.skills.listSkills();
+    const integrations = allSkills.filter(s => s.kind === "integration");
+    const skills = allSkills.filter(s => s.kind !== "integration");
+
+    const integrationsSection = integrations.length > 0
+      ? `You have access to the following integrations:\n${integrations.map(s => `- **${s.name}**: ${s.description}`).join("\n")}`
+      : "";
+
+    const skillsSection = skills.length > 0
+      ? `You have access to the following skills:\n${skills.map(s => `- **${s.name}**: ${s.description}`).join("\n")}`
+      : "";
+
+    const capabilitiesSection = [integrationsSection, skillsSection]
+      .filter(Boolean)
+      .join("\n\n") || "No skills are currently loaded.";
 
     // Fetch context:always notes
     const contextNotes = await this.getAlwaysNotes(userId);
@@ -331,8 +348,7 @@ export class Orchestrator {
 
     return `You are coda, a personal AI assistant. You help your user manage their digital life.
 
-You have access to the following skills:
-${skillDescriptions || "No skills are currently loaded."}
+${capabilitiesSection}
 
 Guidelines:
 - Be concise and helpful
@@ -358,6 +374,19 @@ When the user says "morning", "briefing", "good morning", or "/briefing":
 1. Call email_check for an email summary (if available)
 2. Call calendar_today for today's schedule (if available)
 3. Call reminder_list for pending reminders (if available)
-Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${notesSection}${memorySection}`;
+Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${this.buildAgentSkillsSection()}${notesSection}${memorySection}`;
+  }
+
+  private buildAgentSkillsSection(): string {
+    if (!this.agentSkillDiscovery) return "";
+
+    const skills = this.agentSkillDiscovery.getSkillMetadataList();
+    if (skills.length === 0) return "";
+
+    const entries = skills
+      .map(s => `  <skill name="${s.name}">${s.description}</skill>`)
+      .join("\n");
+
+    return `\n\n<available_skills>\n${entries}\n</available_skills>\nWhen a user's request matches an available skill, use skill_activate to load its instructions.`;
   }
 }

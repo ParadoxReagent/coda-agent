@@ -136,6 +136,7 @@ ask user what LLM in cli while starting
 ask for apis
 ask for discord things?
 slack things?
+firecrawl
 
 Clean way for users to enable skills without modifying config and rebuilding
 

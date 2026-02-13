@@ -207,11 +207,17 @@ You: Search my notes for WiFi
 Bot: Found 1 note: "The WiFi password for the office is sunshine42"
 ```
 
-## Skills
+## Capabilities
 
-### Email
+coda has three types of capabilities: **integrations** (external service connectors), **built-in skills** (agent abilities), and **agent skills** (community/custom instruction-based skills).
 
-Polls your IMAP mailbox and categorizes emails automatically. Urgent emails trigger alerts.
+### Integrations
+
+External service connectors that require credentials and/or polling. Located in `src/integrations/`.
+
+#### Email
+
+Polls your mailbox and categorizes emails automatically. Supports Gmail API (OAuth2) and legacy IMAP. Urgent emails trigger alerts.
 
 | Tool | Description |
 |------|-------------|
@@ -230,7 +236,7 @@ email:
     known_contacts: ["friend@example.com"]
 ```
 
-### Calendar
+#### Calendar
 
 Connects to any CalDAV server (iCloud, Fastmail, Nextcloud, etc.).
 
@@ -241,7 +247,22 @@ Connects to any CalDAV server (iCloud, Fastmail, Nextcloud, etc.).
 | `calendar_create` | Create event (requires confirmation, checks for conflicts) |
 | `calendar_search` | Search by keyword + optional date range |
 
-### Reminders
+#### n8n
+
+Ingests events from [n8n](https://n8n.io) automation workflows. Accepts any event type — emails, GitHub PRs, server alerts, etc.
+
+| Tool | Description |
+|------|-------------|
+| `n8n_query_events` | Query events with flexible filtering by type, category, priority, tags |
+| `n8n_get_summary` | Statistical overview of events by type, category, priority |
+| `n8n_list_event_types` | Discover what event types exist in the system |
+| `n8n_mark_processed` | Mark events as read/processed |
+
+### Built-in Skills
+
+Agent capabilities that don't require external services (beyond PostgreSQL/Redis). Located in `src/skills/`.
+
+#### Reminders
 
 Natural language time parsing powered by chrono-node. Supports one-time and recurring reminders.
 
@@ -254,7 +275,7 @@ Natural language time parsing powered by chrono-node. Supports one-time and recu
 
 A background checker runs every 60 seconds and publishes `alert.reminder.due` events for overdue reminders.
 
-### Notes
+#### Notes
 
 Full-text search with PostgreSQL tsvector. Tag notes for organization — use `context:always` to inject a note into every conversation.
 
@@ -265,7 +286,7 @@ Full-text search with PostgreSQL tsvector. Tag notes for organization — use `c
 | `note_list` | Recent notes, optional tag filter |
 | `note_delete` | Delete by ID |
 
-### Memory
+#### Memory
 
 Semantic memory powered by vector embeddings. The LLM decides what to remember and can retrieve information by *meaning*, not just keywords. Relevant memories are automatically injected into every conversation.
 
@@ -279,11 +300,7 @@ Semantic memory powered by vector embeddings. The LLM decides what to remember a
 
 Requires the memory service (Python, included in Docker Compose) and `MEMORY_API_KEY` in `.env`. See [`src/skills/memory/README.md`](src/skills/memory/README.md) for full setup.
 
-### Morning Briefing
-
-Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available skills. Works gracefully when some skills are not configured.
-
-### Scheduler
+#### Scheduler
 
 Manage cron-based scheduled tasks at runtime.
 
@@ -301,6 +318,83 @@ scheduler:
       cron: "*/5 * * * *"
       enabled: true
 ```
+
+### Agent Skills
+
+coda supports the [Agent Skills standard](https://agentskills.io/specification) for loading community or custom instruction-based skills. Agent skills are directories containing a `SKILL.md` file with YAML frontmatter — no code required.
+
+#### Creating an Agent Skill
+
+Create a directory with a `SKILL.md` file:
+
+```
+my-skills/
+  pdf-tools/
+    SKILL.md
+    scripts/
+      extract.sh
+    references/
+      api.md
+```
+
+The `SKILL.md` must start with YAML frontmatter:
+
+```markdown
+---
+name: pdf-tools
+description: "Extract text from PDFs, fill forms, merge documents."
+---
+
+# PDF Tools
+
+Instructions for the LLM on how to use this skill...
+
+## When to Use
+
+Use this skill when the user asks about PDF files...
+```
+
+**Frontmatter requirements:**
+- `name` — lowercase, alphanumeric + hyphens, max 64 chars (pattern: `/^[a-z][a-z0-9-]*$/`)
+- `description` — max 1024 chars, shown to the LLM in the system prompt
+
+**Supplementary resources** (optional):
+- `scripts/` — Shell scripts, Python scripts, etc.
+- `references/` — API docs, specs, guides
+- `assets/` — Templates, config files, data
+
+Allowed file extensions: `.md`, `.txt`, `.json`, `.yaml`, `.yml`, `.sh`, `.py`, `.js`, `.ts`, `.csv`, `.toml`, `.xml`
+
+#### Configuring Agent Skill Directories
+
+Add directories to scan in `config.yaml`:
+
+```yaml
+skills:
+  agent_skill_dirs:
+    - "./agent-skills"
+    - "~/.agent-skills"
+```
+
+Each directory is scanned for subdirectories containing `SKILL.md` files. The LLM sees all discovered skills in its system prompt and can activate them on demand using the `skill_activate` tool.
+
+#### How It Works
+
+1. On startup, coda scans configured directories for `SKILL.md` files
+2. Valid skills appear in the system prompt as `<available_skills>` entries
+3. When a user request matches a skill, the LLM calls `skill_activate` to load the full instructions
+4. The LLM can then call `skill_read_resource` to access supplementary files from `scripts/`, `references/`, or `assets/`
+
+#### Security
+
+- Path traversal is prevented — resources must be within the skill directory
+- Only allowed file extensions can be read
+- World-writable directories are rejected
+- Skills must be activated before their resources can be accessed
+
+### Morning Briefing
+
+Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available integrations and skills. Works gracefully when some are not configured.
 
 ### Alert Routing
 
