@@ -182,6 +182,19 @@ const SubagentConfigSchema = z.object({
   cleanup_interval_seconds: z.number().default(60),
 });
 
+const DoctorConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  pattern_window_seconds: z.number().default(300),
+  pattern_threshold: z.number().default(10),
+  skill_recovery_interval_seconds: z.number().default(60),
+  max_error_history: z.number().default(500),
+  output_repair: z.object({
+    enabled: z.boolean().default(true),
+    max_attempts: z.number().default(2),
+    quick_fix_only: z.boolean().default(true),
+  }).default({}),
+}).default({});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -210,6 +223,7 @@ const AppConfigSchema = z.object({
   scheduler: SchedulerConfigSchema.optional(),
   subagents: SubagentConfigSchema.optional(),
   firecrawl: FirecrawlConfigSchema.optional(),
+  doctor: DoctorConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

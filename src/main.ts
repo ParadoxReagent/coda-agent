@@ -32,6 +32,8 @@ import { FirecrawlSkill } from "./integrations/firecrawl/skill.js";
 import { SubagentSkill } from "./skills/subagents/skill.js";
 import { AgentSkillDiscovery } from "./skills/agent-skill-discovery.js";
 import { AgentSkillsSkill } from "./skills/agent-skills/skill.js";
+import { DoctorService } from "./core/doctor/doctor-service.js";
+import { DoctorSkill } from "./skills/doctor/skill.js";
 import { SubagentManager } from "./core/subagent-manager.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
@@ -248,6 +250,25 @@ async function main() {
     agentSkillDiscovery
   );
 
+  // 8a. Initialize DoctorService
+  const doctorConfig = config.doctor;
+  const doctorService = new DoctorService(logger, {
+    enabled: doctorConfig?.enabled ?? true,
+    patternWindowMs: (doctorConfig?.pattern_window_seconds ?? 300) * 1000,
+    patternThreshold: doctorConfig?.pattern_threshold ?? 5,
+    skillRecoveryIntervalMs: (doctorConfig?.skill_recovery_interval_seconds ?? 60) * 1000,
+    maxErrorHistory: doctorConfig?.max_error_history ?? 500,
+  }, {
+    eventBus,
+    skillHealthTracker,
+    providerManager,
+  });
+  orchestrator.setDoctorService(doctorService);
+  doctorService.start();
+
+  // Register doctor skill
+  skillRegistry.register(new DoctorSkill(doctorService, skillHealthTracker));
+
   // 8b. Initialize SubagentManager
   const subagentConfig = config.subagents ?? {
     enabled: true,
@@ -375,6 +396,7 @@ async function main() {
   // 13. Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal");
+    doctorService.stop();
     await subagentManager.shutdown();
     await discordBot.stop();
     if (slackBot) await slackBot.stop();

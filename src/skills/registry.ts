@@ -121,7 +121,8 @@ export class SkillRegistry {
   /** Route and execute a tool call. */
   async executeToolCall(
     toolName: string,
-    toolInput: Record<string, unknown>
+    toolInput: Record<string, unknown>,
+    context?: { isSubagent?: boolean; userId?: string }
   ): Promise<string> {
     const skillName = this.toolToSkill.get(toolName);
     if (!skillName) {
@@ -157,6 +158,15 @@ export class SkillRegistry {
     // Validate tool input against schema
     const toolDef = registered.tools.get(toolName);
     if (toolDef) {
+      // Security: enforce mainAgentOnly restriction at runtime
+      if (toolDef.mainAgentOnly && context?.isSubagent) {
+        this.logger.warn(
+          { tool: toolName, skill: skillName, isSubagent: true },
+          "Subagent attempted to call mainAgentOnly tool"
+        );
+        return `Tool "${toolName}" is restricted to the main agent only.`;
+      }
+
       const validation = ToolInputValidator.validate(
         toolName,
         toolDef.input_schema,

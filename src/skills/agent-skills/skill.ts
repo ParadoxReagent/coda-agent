@@ -31,6 +31,17 @@ export class AgentSkillsSkill implements Skill {
         },
       },
       {
+        name: "skill_rescan",
+        description:
+          "Re-scan agent skill directories to discover new or removed skills without restarting. Use when the user says /rescan-skills or asks to reload skills.",
+        mainAgentOnly: true,
+        input_schema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+      {
         name: "skill_read_resource",
         description:
           "Read a supplementary resource file from an activated agent skill (scripts/, references/, or assets/).",
@@ -60,6 +71,8 @@ export class AgentSkillsSkill implements Skill {
     switch (toolName) {
       case "skill_activate":
         return this.activateSkill(toolInput);
+      case "skill_rescan":
+        return this.rescanSkills();
       case "skill_read_resource":
         return this.readResource(toolInput);
       default:
@@ -95,6 +108,28 @@ export class AgentSkillsSkill implements Skill {
           resources.length > 0
             ? `Skill "${skillName}" activated. ${resources.length} resource(s) available — use skill_read_resource to access them.`
             : `Skill "${skillName}" activated.`,
+      });
+    } catch (err) {
+      return JSON.stringify({
+        success: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private rescanSkills(): string {
+    try {
+      const { added, removed } = this.discovery.rescan();
+      const total = this.discovery.getSkillMetadataList().length;
+      return JSON.stringify({
+        success: true,
+        total,
+        added: added.length > 0 ? added : undefined,
+        removed: removed.length > 0 ? removed : undefined,
+        message:
+          added.length === 0 && removed.length === 0
+            ? `Rescan complete. ${total} skill(s) found, no changes.`
+            : `Rescan complete. ${total} skill(s) found. Added: ${added.length}, Removed: ${removed.length}.`,
       });
     } catch (err) {
       return JSON.stringify({

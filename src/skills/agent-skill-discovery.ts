@@ -104,6 +104,31 @@ export class AgentSkillDiscovery {
     );
   }
 
+  /**
+   * Clear discovered skills and re-scan the same directories.
+   * Preserves the activated set so already-activated skills remain usable
+   * if they still exist on disk.
+   */
+  rescan(): { added: string[]; removed: string[] } {
+    const previousNames = new Set(this.skills.keys());
+    this.skills.clear();
+    this.scanDirectories(this.scannedDirs);
+
+    const currentNames = new Set(this.skills.keys());
+    const added = [...currentNames].filter(n => !previousNames.has(n));
+    const removed = [...previousNames].filter(n => !currentNames.has(n));
+
+    // Clean up activated set for skills that no longer exist
+    for (const name of this.activated) {
+      if (!currentNames.has(name)) {
+        this.activated.delete(name);
+      }
+    }
+
+    this.logger.info({ added, removed }, "Agent skill rescan complete");
+    return { added, removed };
+  }
+
   /** Return metadata for all discovered skills (for system prompt injection). */
   getSkillMetadataList(): AgentSkillMetadata[] {
     return Array.from(this.skills.values());

@@ -12,6 +12,8 @@ import {
   mergeCapabilities,
 } from "./capabilities.js";
 import type { ProviderCapabilitiesConfig } from "../../utils/config.js";
+import { OutputRepair } from "../doctor/output-repair.js";
+import { createLogger } from "../../utils/logger.js";
 
 export interface OpenAICompatConfig {
   baseURL?: string;
@@ -25,6 +27,7 @@ export class OpenAICompatProvider implements LLMProvider {
   readonly name: string;
   readonly capabilities: ProviderCapabilities;
   private client: OpenAI;
+  private outputRepair: OutputRepair;
 
   constructor(config: OpenAICompatConfig) {
     this.name = config.name;
@@ -37,6 +40,7 @@ export class OpenAICompatProvider implements LLMProvider {
       DEFAULT_OPENAI_COMPAT_CAPABILITIES,
       config.capabilities
     );
+    this.outputRepair = new OutputRepair(createLogger().child({ component: "output-repair" }));
   }
 
   async chat(params: LLMChatParams): Promise<LLMResponse> {
@@ -95,7 +99,7 @@ export class OpenAICompatProvider implements LLMProvider {
 
     const response = await this.client.chat.completions.create(requestParams);
 
-    return this.toResponse(response, params.model);
+    return await this.toResponse(response, params.model);
   }
 
   private toOpenAITool(
@@ -111,10 +115,10 @@ export class OpenAICompatProvider implements LLMProvider {
     };
   }
 
-  private toResponse(
+  private async toResponse(
     response: OpenAI.ChatCompletion,
     model: string
-  ): LLMResponse {
+  ): Promise<LLMResponse> {
     const choice = response.choices[0];
     const message = choice?.message;
 
@@ -127,7 +131,9 @@ export class OpenAICompatProvider implements LLMProvider {
         try {
           input = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
         } catch {
-          input = {};
+          // Attempt output repair instead of silently defaulting to {}
+          const repaired = await this.outputRepair.tryParseJson(tc.function.arguments ?? "", tc.function.name);
+          input = repaired ?? {};
         }
         toolCalls.push({
           id: tc.id,

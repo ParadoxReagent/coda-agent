@@ -3,11 +3,14 @@
  * and transient error classification.
  */
 import type { Logger } from "../utils/logger.js";
+import { ErrorClassifier } from "./doctor/error-classifier.js";
 
 export interface ExecutionOptions {
   timeout: number;
   retries: number;
 }
+
+const defaultClassifier = new ErrorClassifier();
 
 export class ResilientExecutor {
   static async execute<T>(
@@ -32,7 +35,7 @@ export class ResilientExecutor {
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
-        if (attempt < options.retries && this.isTransient(lastError)) {
+        if (attempt < options.retries && defaultClassifier.classify(lastError).retryable) {
           logger.debug(
             { attempt: attempt + 1, error: lastError.message },
             "Retrying after transient error"
@@ -47,25 +50,8 @@ export class ResilientExecutor {
     throw lastError;
   }
 
+  /** @deprecated Use ErrorClassifier.classify() instead. */
   static isTransient(error: Error): boolean {
-    const message = error.message.toLowerCase();
-    const code = (error as NodeJS.ErrnoException).code;
-
-    // Network errors
-    if (code === "ECONNREFUSED") return true;
-    if (code === "ETIMEDOUT") return true;
-    if (code === "ENOTFOUND") return true;
-    if (code === "ECONNRESET") return true;
-
-    // HTTP status code errors
-    if (message.includes("429")) return true;
-    if (message.includes("500")) return true;
-    if (message.includes("503")) return true;
-
-    // Timeout
-    if (message.includes("timeout")) return true;
-    if (message.includes("timed out")) return true;
-
-    return false;
+    return defaultClassifier.classify(error).retryable;
   }
 }

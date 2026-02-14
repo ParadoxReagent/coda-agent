@@ -44,6 +44,22 @@ Semantic memory powered by vector embeddings. The LLM decides what to remember a
 
 Requires the memory service (Python, included in Docker Compose) and `MEMORY_API_KEY` in `.env`. See [`src/skills/memory/README.md`](src/skills/memory/README.md) for full setup.
 
+### Doctor
+
+System diagnostics and self-healing. The doctor monitors error patterns, repairs malformed LLM output, and can reset degraded skills.
+
+| Tool | Description |
+|------|-------------|
+| `doctor_diagnose` | Run a system diagnostic (skills health, provider status, recent errors, detected patterns) |
+| `doctor_reset_skill` | Reset a degraded/unavailable skill back to healthy (requires confirmation) |
+
+**Self-healing features:**
+- **Error classification** — Unified taxonomy (transient, rate_limited, auth_expired, malformed_output, etc.) replaces ad-hoc retry checks
+- **Output repair** — Two-tier repair for malformed JSON: quick fixes (strip fences, fix commas) then LLM re-prompt
+- **Pattern detection** — Detects repeated errors from the same source and generates recommendations
+- **Truncation handling** — Automatically requests continuation when LLM response hits max_tokens
+- **Periodic recovery** — Probes degraded skills after cooldown period
+
 ### Scheduler
 
 Manage cron-based scheduled tasks at runtime.
@@ -128,6 +144,10 @@ Each directory is scanned for subdirectories containing `SKILL.md` files. The LL
 2. Valid skills appear in the system prompt as `<available_skills>` entries
 3. When a user request matches a skill, the LLM calls `skill_activate` to load the full instructions
 4. The LLM can then call `skill_read_resource` to access supplementary files from `scripts/`, `references/`, or `assets/`
+
+### Live Rescan
+
+You can add or remove agent skills without restarting by sending `/rescan-skills` (or asking the assistant to reload skills). This re-scans all configured directories and reports any added or removed skills. Already-activated skills remain usable if they still exist on disk.
 
 ### Security
 

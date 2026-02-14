@@ -198,7 +198,7 @@ export class BaseAgent {
     for (const tc of toolCalls) {
       try {
         const result = await ResilientExecutor.execute(
-          () => this.skills.executeToolCall(tc.name, tc.input),
+          () => this.skills.executeToolCall(tc.name, tc.input, { isSubagent: this.config.isSubagent }),
           { timeout, retries: 1 },
           this.logger
         );

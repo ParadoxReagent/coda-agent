@@ -63,6 +63,13 @@ export class SkillHealthTracker {
     return new Map(this.health);
   }
 
+  /** Reset a skill back to healthy (used by doctor for manual resets). */
+  resetSkill(skillName: string): void {
+    const h = this.getOrCreate(skillName);
+    h.status = "healthy";
+    h.consecutiveFailures = 0;
+  }
+
   /** Returns false if skill is unavailable AND still within recovery window. */
   isAvailable(skillName: string): boolean {
     const h = this.health.get(skillName);

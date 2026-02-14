@@ -120,17 +120,22 @@ https://prompt.security/clawsec
 
 
 ------------------
-Skills/integrations
+# Skills/integrations
 stock checker?
-self-repair/doctor?
-self improving?
-ask user what LLM in cli while starting
-ask for apis
-ask for discord things?
-slack things?
-
-----------
-CHECK FOR SECURTIY !!!!!!
-https://genai.owasp.org/llm-top-10/
 
 --------
+"Headless" Browser Automation (Playwright/Puppeteer)
+
+You have FireCrawl for scraping (reading), but you need a tool for interaction.
+
+The Integration: Integrate Playwright or Selenium.
+
+The Use Case:
+
+"The Gatekeeper": Log into a portal that requires a button click or simple CAPTCHA solving.
+
+"The Booker": Actually reserve a table or buy a ticket, rather than just finding the link.
+
+Stateful Navigation: Navigate complex SPAs (Single Page Applications) where data is only revealed after specific user interactions (hovering, clicking tabs) that static scrapers might miss.
+
+-----------

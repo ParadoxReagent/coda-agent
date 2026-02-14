@@ -8,6 +8,7 @@ import type { Logger } from "../utils/logger.js";
 import type { NotesSkill } from "../skills/notes/skill.js";
 import type { MemorySkill } from "../skills/memory/skill.js";
 import type { AgentSkillDiscovery } from "../skills/agent-skill-discovery.js";
+import type { DoctorService } from "./doctor/doctor-service.js";
 import { ResilientExecutor } from "./resilient-executor.js";
 import { withContext, createCorrelationId } from "./correlation.js";
 
@@ -17,6 +18,7 @@ const MAX_MESSAGE_LENGTH = 4000;
 
 export class Orchestrator {
   private agentSkillDiscovery?: AgentSkillDiscovery;
+  private doctorService?: DoctorService;
 
   constructor(
     private providerManager: ProviderManager,
@@ -28,6 +30,10 @@ export class Orchestrator {
     agentSkillDiscovery?: AgentSkillDiscovery
   ) {
     this.agentSkillDiscovery = agentSkillDiscovery;
+  }
+
+  setDoctorService(doctorService: DoctorService): void {
+    this.doctorService = doctorService;
   }
 
   async handleMessage(
@@ -168,6 +174,38 @@ export class Orchestrator {
         messages.push(...continuationMessages);
       }
 
+      // 7b. Handle max_tokens truncation — ask the LLM to finish
+      if (response.stopReason === "max_tokens" && response.text) {
+        this.logger.debug("Response truncated at max_tokens, requesting continuation");
+        const continuationMessages: LLMMessage[] = [
+          ...messages,
+          { role: "assistant", content: response.text },
+          { role: "user", content: "Your previous response was truncated. Please continue from where you left off." },
+        ];
+
+        try {
+          const continuation = await provider.chat({
+            model,
+            system,
+            messages: continuationMessages,
+            tools,
+            maxTokens: 4096,
+          });
+
+          await this.providerManager.trackUsage(provider.name, model, continuation.usage);
+
+          if (continuation.text) {
+            response = {
+              ...response,
+              text: response.text + continuation.text,
+              stopReason: continuation.stopReason,
+            };
+          }
+        } catch (err) {
+          this.logger.warn({ error: err }, "Failed to get continuation after max_tokens");
+        }
+      }
+
       // 8. Save context, return response
       let finalText = response.text ?? "I didn't have a response for that.";
 
@@ -225,7 +263,8 @@ export class Orchestrator {
     try {
       const result = await this.skills.executeToolCall(
         action.toolName,
-        action.toolInput
+        action.toolInput,
+        { isSubagent: false, userId }
       );
       return `Confirmed. ${result}`;
     } catch (err) {
@@ -268,7 +307,7 @@ export class Orchestrator {
 
         // Execute with timeout and retry for transient errors
         const result = await ResilientExecutor.execute(
-          () => this.skills.executeToolCall(tc.name, tc.input),
+          () => this.skills.executeToolCall(tc.name, tc.input, { isSubagent: false, userId }),
           { timeout: TOOL_EXECUTION_TIMEOUT_MS, retries: 1 },
           this.logger
         );
@@ -279,6 +318,12 @@ export class Orchestrator {
           { toolName: tc.name, error: err },
           "Tool execution error"
         );
+
+        // Classify and record the error for pattern detection
+        if (this.doctorService) {
+          this.doctorService.recordError(err, tc.name);
+        }
+
         results.push({
           toolCallId: tc.id,
           result: `Error executing ${tc.name}: ${err instanceof Error ? err.message : "Unknown error"}`,
@@ -387,6 +432,7 @@ Compose a natural, friendly briefing from all available results. If some skills 
       .map(s => `  <skill name="${s.name}">${s.description}</skill>`)
       .join("\n");
 
-    return `\n\n<available_skills>\n${entries}\n</available_skills>\nWhen a user's request matches an available skill, use skill_activate to load its instructions.`;
+    return `\n\n<available_skills>\n${entries}\n</available_skills>\nWhen a user's request matches an available skill, use skill_activate to load its instructions.
+When the user says "/rescan-skills" or asks to reload/refresh skills, use skill_rescan to re-scan skill directories.`;
   }
 }

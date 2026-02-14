@@ -218,6 +218,19 @@ skills:
 # Agent skill: activate "web-research" via skill_activate for guided
 # research strategies (quick facts, docs exploration, deep research).
 
+# Doctor — self-healing and diagnostics
+# doctor:
+#   enabled: true
+#   pattern_window_seconds: 300       # time window for pattern detection
+#   pattern_threshold: 10             # errors with same signature to trigger alert
+#   skill_recovery_interval_seconds: 60  # how often to probe degraded skills
+#   max_error_history: 500            # ring buffer size for recent errors
+#   output_repair:
+#     enabled: true                   # repair malformed JSON from LLMs
+#     max_attempts: 2                 # LLM re-prompt attempts for repair
+#     quick_fix_only: true            # SECURITY: true = skip LLM repair (prevents injection attacks)
+#                                     #           false = enable LLM repair (EXPERIMENTAL - use with caution)
+
 # Scheduler configuration (override built-in task schedules)
 # scheduler:
 #   tasks:

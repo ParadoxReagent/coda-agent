@@ -11,8 +11,10 @@ import type {
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { Logger } from "../../utils/logger.js";
 import type { EventBus } from "../events.js";
+import { ErrorClassifier } from "../doctor/error-classifier.js";
 
 const RETRY_DELAYS = [100, 200, 400]; // ms
+const classifier = new ErrorClassifier();
 
 export class ResilientLLMProvider implements LLMProvider {
   readonly name: string;
@@ -87,15 +89,7 @@ export class ResilientLLMProvider implements LLMProvider {
   }
 
   private isRetryable(error: Error): boolean {
-    const msg = error.message.toLowerCase();
-    return (
-      msg.includes("429") ||
-      msg.includes("500") ||
-      msg.includes("503") ||
-      msg.includes("rate limit") ||
-      msg.includes("overloaded") ||
-      msg.includes("timeout")
-    );
+    return classifier.classify(error).retryable;
   }
 
   private sleep(ms: number): Promise<void> {
