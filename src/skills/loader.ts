@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, verify } from "node:crypto";
 import { z } from "zod";
 import { satisfies } from "semver";
 import type { Skill } from "./base.js";
@@ -39,9 +39,14 @@ const ManifestSchema = z.object({
 
 export type SkillManifest = z.infer<typeof ManifestSchema>;
 
+interface SigningKey {
+  id: string;
+  publicKey: string;
+}
+
 interface ExternalPolicy {
   mode: "strict" | "dev";
-  trusted_signing_keys: string[];
+  trusted_signing_keys: SigningKey[];
   allow_unsigned_local: boolean;
   allowed_local_unsigned_dirs: string[];
 }
@@ -58,6 +63,58 @@ export class ExternalSkillLoader {
   constructor(logger: Logger, policy: ExternalPolicy) {
     this.logger = logger;
     this.policy = policy;
+  }
+
+  /**
+   * Verify Ed25519 signature on file hash.
+   * Returns true if valid, false otherwise.
+   */
+  private verifySignature(
+    manifest: SkillManifest,
+    fileHash: string
+  ): boolean {
+    if (!manifest.publisher?.signature || !manifest.publisher?.signingKeyId) {
+      return false;
+    }
+
+    // Find the trusted public key
+    const trustedKey = this.policy.trusted_signing_keys.find(
+      (k) => k.id === manifest.publisher!.signingKeyId
+    );
+
+    if (!trustedKey) {
+      return false;
+    }
+
+    try {
+      // Decode base64 signature and data
+      const signature = Buffer.from(manifest.publisher.signature, "base64");
+      const data = Buffer.from(fileHash, "base64");
+
+      // Parse public key - supports both PEM format and raw base64
+      let publicKeyObject;
+      if (trustedKey.publicKey.includes("BEGIN PUBLIC KEY")) {
+        // PEM format
+        publicKeyObject = createPublicKey(trustedKey.publicKey);
+      } else {
+        // Raw base64 - assume Ed25519
+        const keyBuffer = Buffer.from(trustedKey.publicKey, "base64");
+        publicKeyObject = createPublicKey({
+          key: keyBuffer,
+          format: "der",
+          type: "spki",
+        });
+      }
+
+      // Verify signature
+      return verify(null, data, publicKeyObject, signature);
+    } catch (err) {
+      this.logger.warn(
+        { error: err, keyId: manifest.publisher.signingKeyId },
+        "Signature verification failed"
+      );
+      return false;
+    }
   }
 
   /** Scan configured directories and load all valid external skills. */
@@ -162,16 +219,22 @@ export class ExternalSkillLoader {
           `Skill "${manifest.name}" has no publisher signature (strict mode requires signing)`
         );
       }
-      if (
-        !this.policy.trusted_signing_keys.includes(
-          manifest.publisher.signingKeyId
-        )
-      ) {
+
+      // Verify the signature
+      const fileContent = readFileSync(entryPath);
+      const fileHash = createHash("sha256").update(fileContent).digest("base64");
+
+      if (!this.verifySignature(manifest, fileHash)) {
         throw new Error(
-          `Skill "${manifest.name}" signed with untrusted key "${manifest.publisher.signingKeyId}"`
+          `Skill "${manifest.name}" signature verification failed — ` +
+            `invalid signature or untrusted signing key "${manifest.publisher.signingKeyId}"`
         );
       }
-      // In a real implementation, verify the Ed25519 signature here
+
+      this.logger.info(
+        { skill: manifest.name, keyId: manifest.publisher.signingKeyId },
+        "Skill signature verified successfully"
+      );
     } else if (this.policy.mode === "dev") {
       if (!manifest.publisher?.signature) {
         // Check if the skill is in an allowed unsigned directory

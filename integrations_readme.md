@@ -2,42 +2,6 @@
 
 External service connectors that require credentials and/or polling. Located in `src/integrations/`.
 
-## Email
-
-Polls your mailbox and categorizes emails automatically. Supports Gmail API (OAuth2) and legacy IMAP. Urgent emails trigger alerts.
-
-| Tool | Description |
-|------|-------------|
-| `email_check` | Summary grouped by category (urgent, needs response, informational, low priority) |
-| `email_read` | Read a specific email by UID |
-| `email_search` | Filter by query, sender, or date |
-| `email_flag` | Add/remove IMAP flags (flagged, seen, answered) |
-
-**Setup:** Set env vars (`IMAP_HOST`, `IMAP_USER`, `IMAP_PASS`) or configure Gmail OAuth in `config.yaml`. See `config/config.example.yaml` for full options.
-
-Configure categorization rules in `config.yaml`:
-
-```yaml
-email:
-  categorization:
-    urgent_senders: ["boss@company.com", "cto@company.com"]
-    urgent_keywords: ["URGENT", "ACTION REQUIRED"]
-    known_contacts: ["friend@example.com"]
-```
-
-## Calendar
-
-Connects to any CalDAV server (iCloud, Fastmail, Nextcloud, etc.).
-
-| Tool | Description |
-|------|-------------|
-| `calendar_today` | Today's events |
-| `calendar_upcoming` | Next N days, grouped by date |
-| `calendar_create` | Create event (requires confirmation, checks for conflicts) |
-| `calendar_search` | Search by keyword + optional date range |
-
-**Setup:** Set env vars (`CALDAV_SERVER_URL`, `CALDAV_USERNAME`, `CALDAV_PASSWORD`) or configure in `config.yaml`.
-
 ## n8n
 
 Ingests events from [n8n](https://n8n.io) automation workflows. Accepts any event type — emails, GitHub PRs, server alerts, etc.
@@ -51,7 +15,7 @@ Ingests events from [n8n](https://n8n.io) automation workflows. Accepts any even
 
 ## Firecrawl
 
-Web scraping, crawling, URL discovery, and search via [Firecrawl](https://firecrawl.dev). Supports both Firecrawl Cloud and self-hosted instances.
+Web scraping, crawling, URL discovery, and search via [Firecrawl](https://firecrawl.dev) (API v2). Supports both Firecrawl Cloud and self-hosted instances ([GitHub](https://github.com/firecrawl/firecrawl)).
 
 | Tool | Description |
 |------|-------------|

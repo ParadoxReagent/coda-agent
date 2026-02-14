@@ -139,3 +139,29 @@ The Use Case:
 Stateful Navigation: Navigate complex SPAs (Single Page Applications) where data is only revealed after specific user interactions (hovering, clicking tabs) that static scrapers might miss.
 
 -----------
+2. Plex: "The Active Librarian"
+
+Use plexapi to make your agent a content curator and companion.
+
+The "Spoiler-Free" Companion:
+
+Concept: Your agent checks your current playback session to see exactly where you are in a movie (e.g., timestamp 1:04:20).
+
+Use Case: You ask, "Who is that guy with the scar?" The agent analyzes the cast/plot up to that minute to answer you without revealing that he turns out to be the villain in the end.
+
+Semantic Library Search:
+
+Concept: Ingest your Plex database (titles, plot summaries, and even subtitle files) into your agent's vector memory.
+
+Use Case: "Find me that episode of The Office where Dwight starts a fire." The agent searches the subtitle embeddings and immediately plays that specific episode on your TV.
+
+
+----------
+Movie/Show Recommender - Smart suggestions based on family viewing history, mood, and who's watching
+
+using tautelli?
+
+----------
+Dream Journal Analyzer - Log and find patterns in dreams (kids love this!)
+
+-----------

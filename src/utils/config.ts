@@ -19,6 +19,22 @@ const ProviderConfigSchema = z.object({
   capabilities: ProviderCapabilitiesSchema.optional(),
 });
 
+const TierConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  light: z.object({
+    provider: z.string(),
+    model: z.string(),
+  }),
+  heavy: z.object({
+    provider: z.string(),
+    model: z.string(),
+  }),
+  heavy_tools: z.array(z.string()).default([]),
+  heavy_patterns: z.array(z.string()).default([]),
+  heavy_message_length: z.number().default(800),
+  show_tier: z.boolean().default(false),
+});
+
 const LLMConfigSchema = z.object({
   default_provider: z.string(),
   default_model: z.string(),
@@ -28,11 +44,17 @@ const LLMConfigSchema = z.object({
     .optional(),
   daily_spend_alert_threshold: z.number().optional(),
   failover_chain: z.array(z.string()).optional(),
+  tiers: TierConfigSchema.optional(),
+});
+
+const SigningKeySchema = z.object({
+  id: z.string(),
+  publicKey: z.string(), // Ed25519 public key in base64 or PEM format
 });
 
 const ExternalPolicySchema = z.object({
   mode: z.enum(["strict", "dev"]).default("strict"),
-  trusted_signing_keys: z.array(z.string()).default([]),
+  trusted_signing_keys: z.array(SigningKeySchema).default([]),
   allow_unsigned_local: z.boolean().default(false),
   allowed_local_unsigned_dirs: z.array(z.string()).default([]),
 });
@@ -54,50 +76,6 @@ const SlackConfigSchema = z.object({
   bot_token: z.string(),
   channel_id: z.string(),
   allowed_user_ids: z.array(z.string()),
-});
-
-const EmailOAuthConfigSchema = z.object({
-  client_id: z.string(),
-  client_secret: z.string(),
-  redirect_port: z.number().default(3000),
-  scopes: z.array(z.string()).default([
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-  ]),
-});
-
-const EmailConfigSchema = z.object({
-  // Gmail API with OAuth (preferred)
-  oauth: EmailOAuthConfigSchema.optional(),
-  gmail_user: z.string().optional(),
-
-  // Legacy IMAP config (fallback)
-  imap_host: z.string().optional(),
-  imap_port: z.number().default(993),
-  imap_user: z.string().optional(),
-  imap_pass: z.string().optional(),
-  imap_tls: z.boolean().default(true),
-
-  // Common settings
-  poll_interval_seconds: z.number().default(300),
-  folders: z.array(z.string()).default(["INBOX"]),
-  labels: z.array(z.string()).default(["INBOX"]),
-  categorization: z.object({
-    urgent_senders: z.array(z.string()).default([]),
-    urgent_keywords: z.array(z.string()).default([]),
-    known_contacts: z.array(z.string()).default([]),
-  }).default({}),
-}).refine(
-  (data) => (data.oauth && data.gmail_user) || (data.imap_host && data.imap_user && data.imap_pass),
-  { message: "Either (oauth + gmail_user) or (imap_host + imap_user + imap_pass) must be provided" }
-);
-
-const CalendarConfigSchema = z.object({
-  caldav_server_url: z.string(),
-  caldav_username: z.string(),
-  caldav_password: z.string(),
-  timezone: z.string().default("America/New_York"),
-  default_calendar: z.string().optional(),
 });
 
 const RemindersConfigSchema = z.object({
@@ -152,10 +130,20 @@ const FirecrawlConfigSchema = z.object({
     window_seconds: z.number().default(60),
   }).default({}),
   cache_ttl_seconds: z.number().default(3600),
+  url_allowlist: z.array(z.string()).default([]),
+  url_blocklist: z.array(z.string()).default([]),
 }).refine(
   (data) => data.api_key || data.api_url !== "https://api.firecrawl.dev",
   { message: "api_key is required when using Firecrawl Cloud (default api_url)" }
 );
+
+const WeatherConfigSchema = z.object({
+  default_latitude: z.number().default(42.0314),
+  default_longitude: z.number().default(-80.2553),
+  user_agent: z.string().default("coda-agent/1.0 (weather-integration)"),
+  timeout_ms: z.number().default(10000),
+  cache_ttl_seconds: z.number().default(900),
+});
 
 const SchedulerConfigSchema = z.object({
   tasks: z.record(z.object({
@@ -180,6 +168,14 @@ const SubagentConfigSchema = z.object({
     window_seconds: z.number().default(3600),
   }).default({}),
   cleanup_interval_seconds: z.number().default(60),
+  safe_default_tools: z.array(z.string()).default([
+    "firecrawl_scrape",
+    "firecrawl_search",
+    "firecrawl_map",
+    "note_save",
+    "note_search",
+  ]),
+  restricted_tools: z.array(z.string()).default([]),
 });
 
 const DoctorConfigSchema = z.object({
@@ -195,6 +191,10 @@ const DoctorConfigSchema = z.object({
   }).default({}),
 }).default({});
 
+const SecurityConfigSchema = z.object({
+  sensitive_tool_policy: z.enum(["log", "confirm_with_external", "always_confirm"]).default("log"),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -204,18 +204,19 @@ const AppConfigSchema = z.object({
     .object({
       url: z
         .string()
-        .default("postgresql://coda:coda@localhost:5432/coda"),
+        .default("postgresql://localhost:5432/coda"),
+      conversation_retention_days: z.number().default(30),
     })
     .default({}),
   server: z
     .object({
       port: z.number().default(3000),
-      host: z.string().default("0.0.0.0"),
+      host: z.string().default("127.0.0.1"),
+      api_key: z.string().optional(),
+      require_auth_for_health: z.boolean().default(false),
     })
     .default({}),
   slack: SlackConfigSchema.optional(),
-  email: EmailConfigSchema.optional(),
-  calendar: CalendarConfigSchema.optional(),
   reminders: RemindersConfigSchema.optional(),
   notes: NotesConfigSchema.optional(),
   memory: MemoryConfigSchema.optional(),
@@ -223,14 +224,18 @@ const AppConfigSchema = z.object({
   scheduler: SchedulerConfigSchema.optional(),
   subagents: SubagentConfigSchema.optional(),
   firecrawl: FirecrawlConfigSchema.optional(),
+  weather: WeatherConfigSchema.optional(),
   doctor: DoctorConfigSchema.optional(),
+  security: SecurityConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
 export type FirecrawlConfig = z.infer<typeof FirecrawlConfigSchema>;
+export type WeatherConfig = z.infer<typeof WeatherConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderCapabilitiesConfig = z.infer<typeof ProviderCapabilitiesSchema>;
+export type TierConfig = z.infer<typeof TierConfigSchema>;
 
 /**
  * Load configuration from YAML file with environment variable overrides.
@@ -259,6 +264,12 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
   const discord = ensureObject(config, "discord");
   const redis = ensureObject(config, "redis");
   const database = ensureObject(config, "database");
+
+  // Server overrides
+  const server = ensureObject(config, "server");
+  if (process.env.API_KEY) server.api_key = process.env.API_KEY;
+  if (process.env.SERVER_HOST) server.host = process.env.SERVER_HOST;
+  if (process.env.SERVER_PORT) server.port = Number(process.env.SERVER_PORT);
 
   // Discord overrides
   if (process.env.DISCORD_BOT_TOKEN) discord.bot_token = process.env.DISCORD_BOT_TOKEN;
@@ -306,24 +317,6 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
       openrouter.models = ["anthropic/claude-sonnet-4-5"];
   }
 
-  // Gmail OAuth overrides
-  if (process.env.GMAIL_OAUTH_CLIENT_ID || process.env.GMAIL_OAUTH_CLIENT_SECRET) {
-    const email = ensureObject(config, "email");
-    const oauth = ensureObject(email, "oauth");
-    if (process.env.GMAIL_OAUTH_CLIENT_ID) oauth.client_id = process.env.GMAIL_OAUTH_CLIENT_ID;
-    if (process.env.GMAIL_OAUTH_CLIENT_SECRET) oauth.client_secret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
-    if (process.env.GMAIL_OAUTH_REDIRECT_PORT) oauth.redirect_port = parseInt(process.env.GMAIL_OAUTH_REDIRECT_PORT, 10);
-    if (process.env.GMAIL_USER) email.gmail_user = process.env.GMAIL_USER;
-  }
-
-  // IMAP / Email overrides (legacy)
-  if (process.env.IMAP_HOST || process.env.IMAP_USER || process.env.IMAP_PASS) {
-    const email = ensureObject(config, "email");
-    if (process.env.IMAP_HOST) email.imap_host = process.env.IMAP_HOST;
-    if (process.env.IMAP_USER) email.imap_user = process.env.IMAP_USER;
-    if (process.env.IMAP_PASS) email.imap_pass = process.env.IMAP_PASS;
-  }
-
   // Slack overrides
   if (process.env.SLACK_APP_TOKEN || process.env.SLACK_BOT_TOKEN) {
     const slack = ensureObject(config, "slack");
@@ -349,12 +342,20 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     if (process.env.FIRECRAWL_API_URL) firecrawl.api_url = process.env.FIRECRAWL_API_URL;
   }
 
-  // CalDAV / Calendar overrides
-  if (process.env.CALDAV_SERVER_URL || process.env.CALDAV_USERNAME || process.env.CALDAV_PASSWORD) {
-    const calendar = ensureObject(config, "calendar");
-    if (process.env.CALDAV_SERVER_URL) calendar.caldav_server_url = process.env.CALDAV_SERVER_URL;
-    if (process.env.CALDAV_USERNAME) calendar.caldav_username = process.env.CALDAV_USERNAME;
-    if (process.env.CALDAV_PASSWORD) calendar.caldav_password = process.env.CALDAV_PASSWORD;
+  // Tier overrides
+  if (process.env.TIER_ENABLED !== undefined) {
+    const tiers = ensureObject(llm, "tiers");
+    tiers.enabled = process.env.TIER_ENABLED === "true";
+  }
+  if (process.env.TIER_LIGHT_MODEL) {
+    const tiers = ensureObject(llm, "tiers");
+    const light = ensureObject(tiers, "light");
+    light.model = process.env.TIER_LIGHT_MODEL;
+  }
+  if (process.env.TIER_HEAVY_MODEL) {
+    const tiers = ensureObject(llm, "tiers");
+    const heavy = ensureObject(tiers, "heavy");
+    heavy.model = process.env.TIER_HEAVY_MODEL;
   }
 
   // Set defaults for llm config

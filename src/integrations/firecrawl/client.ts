@@ -1,6 +1,7 @@
 /**
- * Thin HTTP client for Firecrawl REST API v1.
+ * Thin HTTP client for Firecrawl REST API v2.
  * Uses native fetch — no SDK dependency.
+ * Compatible with both Firecrawl Cloud (https://api.firecrawl.dev) and self-hosted instances.
  */
 
 export interface FirecrawlClientOptions {
@@ -96,7 +97,7 @@ export class FirecrawlClient {
   }
 
   async scrape(params: ScrapeParams): Promise<ScrapeResult> {
-    return this.post<ScrapeResult>("/v1/scrape", {
+    return this.post<ScrapeResult>("/v2/scrape", {
       url: params.url,
       formats: params.formats ?? ["markdown"],
       onlyMainContent: params.onlyMainContent ?? true,
@@ -105,7 +106,7 @@ export class FirecrawlClient {
   }
 
   async crawlStart(params: CrawlParams): Promise<CrawlStartResult> {
-    return this.post<CrawlStartResult>("/v1/crawl", {
+    return this.post<CrawlStartResult>("/v2/crawl", {
       url: params.url,
       maxDepth: params.maxDepth ?? 2,
       limit: params.limit ?? 10,
@@ -115,11 +116,11 @@ export class FirecrawlClient {
   }
 
   async crawlStatus(jobId: string): Promise<CrawlStatusResult> {
-    return this.get<CrawlStatusResult>(`/v1/crawl/${encodeURIComponent(jobId)}`);
+    return this.get<CrawlStatusResult>(`/v2/crawl/${encodeURIComponent(jobId)}`);
   }
 
   async map(params: MapParams): Promise<MapResult> {
-    return this.post<MapResult>("/v1/map", {
+    return this.post<MapResult>("/v2/map", {
       url: params.url,
       search: params.search,
       limit: params.limit,
@@ -127,7 +128,7 @@ export class FirecrawlClient {
   }
 
   async search(params: SearchParams): Promise<SearchResult> {
-    return this.post<SearchResult>("/v1/search", {
+    return this.post<SearchResult>("/v2/search", {
       query: params.query,
       limit: params.limit ?? 5,
       lang: params.lang,

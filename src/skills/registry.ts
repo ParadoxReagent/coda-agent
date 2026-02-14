@@ -12,13 +12,12 @@ interface RegisteredSkill {
 }
 
 const DEFAULT_SKILL_RATE_LIMITS: Record<string, { maxRequests: number; windowSeconds: number }> = {
-  calendar: { maxRequests: 20, windowSeconds: 3600 },
-  email: { maxRequests: 60, windowSeconds: 3600 },
   notes: { maxRequests: 100, windowSeconds: 3600 },
   reminders: { maxRequests: 50, windowSeconds: 3600 },
   n8n: { maxRequests: 100, windowSeconds: 3600 },
   memory: { maxRequests: 100, windowSeconds: 3600 },
   firecrawl: { maxRequests: 30, windowSeconds: 60 },
+  weather: { maxRequests: 60, windowSeconds: 3600 },
 };
 
 export class SkillRegistry {
@@ -181,6 +180,19 @@ export class SkillRegistry {
       }
     }
 
+    // Log sensitive tool access at info level
+    if (toolDef?.sensitive) {
+      this.logger.info(
+        {
+          skill: skillName,
+          tool: toolName,
+          inputSummary: Object.keys(toolInput).join(", "),
+          userId: context?.userId,
+        },
+        "Sensitive tool accessed"
+      );
+    }
+
     // Execute with health tracking
     const startMs = Date.now();
     try {
@@ -229,7 +241,7 @@ export class SkillRegistry {
 
   private isInternalSkill(skillName: string): boolean {
     const internalSkills = new Set([
-      "notes", "reminders", "calendar", "email", "scheduler", "n8n", "memory", "firecrawl",
+      "notes", "reminders", "scheduler", "n8n", "memory", "firecrawl", "weather",
     ]);
     return internalSkills.has(skillName);
   }
@@ -244,6 +256,18 @@ export class SkillRegistry {
 
     const tool = registered.tools.get(toolName);
     return tool?.requiresConfirmation === true;
+  }
+
+  /** Check if a tool is marked as sensitive (accesses private data). */
+  isSensitiveTool(toolName: string): boolean {
+    const skillName = this.toolToSkill.get(toolName);
+    if (!skillName) return false;
+
+    const registered = this.skills.get(skillName);
+    if (!registered) return false;
+
+    const tool = registered.tools.get(toolName);
+    return tool?.sensitive === true;
   }
 
   /** Get a registered skill by name. */

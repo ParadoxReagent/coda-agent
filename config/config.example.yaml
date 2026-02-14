@@ -63,6 +63,43 @@ llm:
 
   daily_spend_alert_threshold: 10.0
 
+  # Dual LLM Tier Routing — cost optimization via light/heavy model routing
+  # When enabled, simple requests use a fast/cheap "light" model (e.g., Haiku).
+  # Complex requests or heavy tool calls automatically escalate to "heavy" model (e.g., Sonnet).
+  # This can significantly reduce costs while maintaining quality where it matters.
+  #
+  # tiers:
+  #   enabled: true
+  #   light:
+  #     provider: "anthropic"
+  #     model: "claude-haiku-3-5-20241022"
+  #   heavy:
+  #     provider: "anthropic"
+  #     model: "claude-sonnet-4-5-20250514"
+  #   heavy_tools:              # Tools that trigger escalation from light to heavy
+  #     - "delegate_to_subagent"
+  #     - "sessions_spawn"
+  #     - "firecrawl_crawl"
+  #     - "firecrawl_search"
+  #     - "skill_activate"
+  #   heavy_patterns:           # Message patterns that route directly to heavy
+  #     - "research"
+  #     - "analyze"
+  #     - "compare"
+  #     - "deep dive"
+  #   heavy_message_length: 800 # Character threshold for heavy routing
+  #   show_tier: false          # Show tier indicator in responses
+  #
+  # Environment variable overrides:
+  #   TIER_ENABLED=true|false
+  #   TIER_LIGHT_MODEL=claude-haiku-3-5-20241022
+  #   TIER_HEAVY_MODEL=claude-sonnet-4-5-20250514
+  #
+  # User commands (Discord):
+  #   /model tier light <provider> <model>  — Set light tier model
+  #   /model tier heavy <provider> <model>  — Set heavy tier model
+  #   /model status                         — Show tier configuration and per-tier usage
+
 discord:
   bot_token: ""
   channel_id: ""
@@ -72,39 +109,14 @@ redis:
   url: "redis://localhost:6379"
 
 database:
-  url: "postgresql://coda:coda@localhost:5432/coda"
+  url: "postgresql://localhost:5432/coda"  # Change default credentials for production!
+  # conversation_retention_days: 30  # Auto-delete conversations older than this (when DB storage is enabled)
 
 server:
   port: 3000
-  host: "0.0.0.0"
-
-# Email — Gmail API with OAuth2 (preferred)
-# Set up with: pnpm run setup:email-oauth
-# email:
-#   oauth:
-#     client_id: "your-client-id.apps.googleusercontent.com"
-#     client_secret: "your-client-secret"
-#     redirect_port: 3000
-#     scopes:
-#       - "https://www.googleapis.com/auth/gmail.readonly"
-#       - "https://www.googleapis.com/auth/gmail.modify"
-#   gmail_user: "your-email@gmail.com"
-#   labels:
-#     - "INBOX"
-#   poll_interval_seconds: 300
-#   categorization:
-#     urgent_senders: []
-#     urgent_keywords: []
-#     known_contacts: []
-
-# Email — Legacy IMAP (fallback)
-# email:
-#   imap_host: "imap.gmail.com"
-#   imap_user: "your-email@gmail.com"
-#   imap_pass: "your-app-password"
-#   folders:
-#     - "INBOX"
-#   poll_interval_seconds: 300
+  host: "127.0.0.1"
+  # api_key: "${API_KEY}"                   # Bearer token for REST API auth
+  # require_auth_for_health: false          # Whether /health requires auth
 
 # Memory — semantic memory with vector embeddings
 # memory:
@@ -118,6 +130,10 @@ skills:
   external_dirs: []
   external_policy:
     mode: "strict"
+    # Trusted Ed25519 public keys for verifying external skill signatures
+    # trusted_signing_keys:
+    #   - id: "publisher-id-1"
+    #     publicKey: "base64-encoded-ed25519-public-key" # or PEM format
     trusted_signing_keys: []
     allow_unsigned_local: false
     allowed_local_unsigned_dirs:
@@ -133,11 +149,6 @@ skills:
 # Alerts configuration
 # alerts:
 #   rules:
-#     "alert.email.urgent":
-#       severity: "high"
-#       channels: ["discord"]
-#       quietHours: true
-#       cooldown: 300
 #     "alert.reminder.due":
 #       severity: "medium"
 #       channels: ["discord"]
@@ -181,16 +192,26 @@ skills:
 #     max_requests: 10
 #     window_seconds: 3600
 #   cleanup_interval_seconds: 60
+#   # Security: safe default tools when sessions_spawn called without allowed_tools
+#   safe_default_tools:
+#     - "firecrawl_scrape"
+#     - "firecrawl_search"
+#     - "firecrawl_map"
+#     - "note_save"
+#     - "note_search"
+#   # Tools that should never be auto-granted (require explicit allowedTools)
+#   restricted_tools: []
 
-# Firecrawl — web scraping, crawling, URL mapping, and search
+# Firecrawl — web scraping, crawling, URL mapping, and search (API v2)
 # Supports both Firecrawl Cloud (api_key required) and self-hosted instances.
+# Self-hosted setup: https://github.com/firecrawl/firecrawl
 # Env overrides: FIRECRAWL_API_KEY, FIRECRAWL_API_URL
 #
 # Cloud usage (default):
 # firecrawl:
 #   api_key: "fc-..."                  # or set FIRECRAWL_API_KEY env var
 #
-# Self-hosted:
+# Self-hosted (e.g., Docker on localhost:3002):
 # firecrawl:
 #   api_url: "http://localhost:3002"   # no api_key needed for self-hosted
 #
@@ -207,6 +228,8 @@ skills:
 #     max_requests: 30                       # requests per window
 #     window_seconds: 60                     # rate limit window
 #   cache_ttl_seconds: 3600                  # cache scrape/search results (1 hour)
+#   url_allowlist: []                        # if set, only these domains allowed (e.g., ["example.com", "docs.anthropic.com"])
+#   url_blocklist: []                        # these domains always blocked (e.g., ["malicious.com"])
 #
 # Available tools (once enabled):
 #   firecrawl_scrape        — Scrape a single URL → clean markdown
@@ -217,6 +240,33 @@ skills:
 #
 # Agent skill: activate "web-research" via skill_activate for guided
 # research strategies (quick facts, docs exploration, deep research).
+
+# Weather — NWS forecast, current conditions & alerts (free, no API key)
+# National Weather Service API provides free weather data for US locations.
+# No API key required — just specify default location coordinates.
+#
+# weather:
+#   default_latitude: 42.0314        # Fairview, PA
+#   default_longitude: -80.2553
+#   user_agent: "coda-agent/1.0 (weather-integration)"
+#   timeout_ms: 10000
+#   cache_ttl_seconds: 900           # 15 minutes for forecast
+#
+# Available tools (once enabled):
+#   weather_forecast  — Period forecast (Today, Tonight, Tomorrow, etc.)
+#   weather_current   — Current temp, humidity, wind from nearest station
+#   weather_alerts    — Active watches, warnings, and advisories
+#
+# Usage examples (in Discord/Slack):
+#   "What's the weather?"                     → uses default location
+#   "What's the weather in New York?"         → LLM passes coords 40.7128, -74.0060
+#   "Any weather alerts?"                     → checks for active alerts
+#
+# Caching strategy:
+#   - Grid/station mapping: 24 hours (static data)
+#   - Forecast data: 15 minutes
+#   - Current conditions: 5 minutes
+#   - Active alerts: 5 minutes
 
 # Doctor — self-healing and diagnostics
 # doctor:
@@ -230,6 +280,10 @@ skills:
 #     max_attempts: 2                 # LLM re-prompt attempts for repair
 #     quick_fix_only: true            # SECURITY: true = skip LLM repair (prevents injection attacks)
 #                                     #           false = enable LLM repair (EXPERIMENTAL - use with caution)
+
+# Security — sensitive tool access policy
+# security:
+#   sensitive_tool_policy: "log"   # "log" | "confirm_with_external" | "always_confirm"
 
 # Scheduler configuration (override built-in task schedules)
 # scheduler:

@@ -19,6 +19,8 @@ export class FirecrawlSkill implements Skill {
   private redis!: SkillRedisClient;
   private maxContentLength = DEFAULT_MAX_CONTENT_LENGTH;
   private cacheTtl = DEFAULT_CACHE_TTL;
+  private urlAllowlist: string[] = [];
+  private urlBlocklist: string[] = [];
 
   getTools(): SkillToolDefinition[] {
     return [
@@ -194,6 +196,8 @@ export class FirecrawlSkill implements Skill {
     this.maxContentLength =
       (defaults.max_content_length as number) ?? DEFAULT_MAX_CONTENT_LENGTH;
     this.cacheTtl = (cfg.cache_ttl_seconds as number) ?? DEFAULT_CACHE_TTL;
+    this.urlAllowlist = (cfg.url_allowlist as string[]) ?? [];
+    this.urlBlocklist = (cfg.url_blocklist as string[]) ?? [];
 
     this.client = new FirecrawlClient({ apiUrl, apiKey, timeoutMs });
     this.logger.info({ apiUrl }, "Firecrawl skill started");
@@ -205,8 +209,53 @@ export class FirecrawlSkill implements Skill {
 
   // --- Tool implementations ---
 
+  /**
+   * Validate URL against allowlist/blocklist.
+   * Returns an error message if blocked, null if allowed.
+   */
+  private validateUrl(url: string): string | null {
+    try {
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname.toLowerCase();
+
+      // Check blocklist first
+      if (this.urlBlocklist.length > 0) {
+        for (const blocked of this.urlBlocklist) {
+          if (hostname === blocked.toLowerCase() || hostname.endsWith(`.${blocked.toLowerCase()}`)) {
+            return `URL blocked by policy: ${hostname} matches blocklist entry "${blocked}"`;
+          }
+        }
+      }
+
+      // Check allowlist if configured
+      if (this.urlAllowlist.length > 0) {
+        let allowed = false;
+        for (const allowed_domain of this.urlAllowlist) {
+          if (hostname === allowed_domain.toLowerCase() || hostname.endsWith(`.${allowed_domain.toLowerCase()}`)) {
+            allowed = true;
+            break;
+          }
+        }
+        if (!allowed) {
+          return `URL not in allowlist: ${hostname}. Allowlist: ${this.urlAllowlist.join(", ")}`;
+        }
+      }
+
+      return null; // Allowed
+    } catch (err) {
+      return `Invalid URL: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   private async scrape(input: Record<string, unknown>): Promise<string> {
     const url = input.url as string;
+
+    // Validate URL against allowlist/blocklist
+    const validationError = this.validateUrl(url);
+    if (validationError) {
+      return JSON.stringify({ success: false, error: validationError });
+    }
+
     const cacheKey = `scrape:${url}`;
 
     const cached = await this.redis.get(cacheKey);
@@ -243,6 +292,13 @@ export class FirecrawlSkill implements Skill {
 
   private async crawl(input: Record<string, unknown>): Promise<string> {
     const url = input.url as string;
+
+    // Validate URL against allowlist/blocklist
+    const validationError = this.validateUrl(url);
+    if (validationError) {
+      return JSON.stringify({ success: false, error: validationError });
+    }
+
     const maxDepth = Math.min(Math.max((input.max_depth as number) ?? 2, 1), 5);
     const limit = Math.min(Math.max((input.limit as number) ?? 10, 1), 50);
 
@@ -294,6 +350,13 @@ export class FirecrawlSkill implements Skill {
 
   private async mapUrls(input: Record<string, unknown>): Promise<string> {
     const url = input.url as string;
+
+    // Validate URL against allowlist/blocklist
+    const validationError = this.validateUrl(url);
+    if (validationError) {
+      return JSON.stringify({ success: false, error: validationError });
+    }
+
     const result = await this.client.map({
       url,
       search: input.search as string | undefined,

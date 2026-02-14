@@ -48,6 +48,7 @@ export class NotesSkill implements Skill {
         name: "note_search",
         description:
           "Search notes using full-text search. Optionally filter by tags.",
+        sensitive: true,
         input_schema: {
           type: "object",
           properties: {
@@ -72,6 +73,7 @@ export class NotesSkill implements Skill {
         name: "note_list",
         description:
           "List recent notes, optionally filtered by tag. Sorted by creation date (newest first).",
+        sensitive: true,
         input_schema: {
           type: "object",
           properties: {

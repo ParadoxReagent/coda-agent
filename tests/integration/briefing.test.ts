@@ -106,9 +106,8 @@ describe("Morning Briefing Integration", () => {
     // Verify the system prompt sent to the LLM contains briefing instructions
     const chatCall = provider.chatMock.mock.calls[0]![0];
     expect(chatCall.system).toContain("Morning Briefing");
-    expect(chatCall.system).toContain("email_check");
-    expect(chatCall.system).toContain("calendar_today");
     expect(chatCall.system).toContain("reminder_list");
+    expect(chatCall.system).toContain("n8n");
   });
 
   it("briefing works when some skills are missing", async () => {

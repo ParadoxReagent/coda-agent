@@ -16,16 +16,41 @@ interface HealthDeps {
   providerManager?: ProviderManager;
 }
 
+interface AuthOptions {
+  apiKey?: string;
+  requireAuthForHealth?: boolean;
+}
+
 export class RestApi {
   private app = Fastify({ logger: false });
   private logger: Logger;
   private startTime = Date.now();
   private deps: HealthDeps;
+  private authOptions: AuthOptions;
 
-  constructor(logger: Logger, deps?: HealthDeps) {
+  constructor(logger: Logger, deps?: HealthDeps, authOptions?: AuthOptions) {
     this.logger = logger;
     this.deps = deps ?? {};
+    this.authOptions = authOptions ?? {};
+    this.setupAuth();
     this.setupRoutes();
+  }
+
+  private setupAuth(): void {
+    const { apiKey, requireAuthForHealth } = this.authOptions;
+    if (!apiKey) return; // No API key configured — open access
+
+    this.app.addHook("onRequest", async (request, reply) => {
+      // Allow /health without auth unless requireAuthForHealth is true
+      if (request.url === "/health" && !requireAuthForHealth) {
+        return;
+      }
+
+      const authHeader = request.headers.authorization;
+      if (!authHeader || authHeader !== `Bearer ${apiKey}`) {
+        reply.code(401).send({ error: "Unauthorized" });
+      }
+    });
   }
 
   private setupRoutes(): void {

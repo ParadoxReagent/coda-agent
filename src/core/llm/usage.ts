@@ -8,6 +8,7 @@ export interface UsageRecord {
   outputTokens: number | null;
   timestamp: Date;
   estimatedCost: number | null;
+  tier?: "light" | "heavy";
 }
 
 export interface DailyUsageSummary {
@@ -48,7 +49,8 @@ export class UsageTracker {
   async track(
     provider: string,
     model: string,
-    usage: { inputTokens: number | null; outputTokens: number | null }
+    usage: { inputTokens: number | null; outputTokens: number | null },
+    tier?: "light" | "heavy"
   ): Promise<void> {
     const cost = this.calculateCost(model, usage);
 
@@ -59,6 +61,7 @@ export class UsageTracker {
       outputTokens: usage.outputTokens,
       timestamp: new Date(),
       estimatedCost: cost,
+      tier,
     });
 
     // Check daily spend alert
@@ -143,6 +146,62 @@ export class UsageTracker {
     }
 
     return hasTracked ? total : null;
+  }
+
+  /** Get aggregated usage for today, grouped by tier. */
+  getDailyUsageByTier(): Map<
+    "light" | "heavy",
+    DailyUsageSummary[]
+  > {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const todayRecords = this.records.filter((r) => r.timestamp >= today);
+    const tierMap = new Map<"light" | "heavy", Map<string, DailyUsageSummary>>();
+
+    for (const record of todayRecords) {
+      if (!record.tier) continue; // Skip records without tier info
+
+      let tierGroups = tierMap.get(record.tier);
+      if (!tierGroups) {
+        tierGroups = new Map();
+        tierMap.set(record.tier, tierGroups);
+      }
+
+      const key = `${record.provider}:${record.model}`;
+      const existing = tierGroups.get(key);
+
+      if (existing) {
+        existing.totalInputTokens += record.inputTokens ?? 0;
+        existing.totalOutputTokens += record.outputTokens ?? 0;
+        existing.requestCount++;
+        if (record.estimatedCost !== null && existing.estimatedCost !== null) {
+          existing.estimatedCost += record.estimatedCost;
+        }
+        if (record.inputTokens === null && record.outputTokens === null) {
+          existing.usageTracked = false;
+        }
+      } else {
+        tierGroups.set(key, {
+          provider: record.provider,
+          model: record.model,
+          totalInputTokens: record.inputTokens ?? 0,
+          totalOutputTokens: record.outputTokens ?? 0,
+          requestCount: 1,
+          estimatedCost: record.estimatedCost,
+          usageTracked:
+            record.inputTokens !== null || record.outputTokens !== null,
+        });
+      }
+    }
+
+    // Convert maps to arrays
+    const result = new Map<"light" | "heavy", DailyUsageSummary[]>();
+    for (const [tier, groups] of tierMap) {
+      result.set(tier, Array.from(groups.values()));
+    }
+
+    return result;
   }
 
   private calculateCost(

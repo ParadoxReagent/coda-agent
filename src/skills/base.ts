@@ -11,6 +11,10 @@ export interface SkillToolDefinition extends LLMToolDefinition {
   requiresConfirmation?: boolean;
   /** If true, this tool is excluded from subagent tool lists. */
   mainAgentOnly?: boolean;
+  /** If set to "heavy", this tool triggers escalation from light to heavy tier. */
+  tierHint?: "heavy";
+  /** If true, tool accesses private data. Logged at info level; confirmation enforced per sensitive_tool_policy. */
+  sensitive?: boolean;
 }
 
 /** The contract every skill must implement. */

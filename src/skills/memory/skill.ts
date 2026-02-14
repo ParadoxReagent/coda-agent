@@ -55,6 +55,7 @@ export class MemorySkill implements Skill {
         name: "memory_search",
         description:
           "Search memories by meaning (semantic search). Returns memories similar to the query.",
+        sensitive: true,
         input_schema: {
           type: "object",
           properties: {
@@ -84,6 +85,7 @@ export class MemorySkill implements Skill {
         name: "memory_context",
         description:
           "Get assembled context from memories for a topic. Returns a formatted summary of relevant memories within a token budget.",
+        sensitive: true,
         input_schema: {
           type: "object",
           properties: {
@@ -103,6 +105,7 @@ export class MemorySkill implements Skill {
         name: "memory_list",
         description:
           "List recent memories, optionally filtered by content type or tag.",
+        sensitive: true,
         input_schema: {
           type: "object",
           properties: {

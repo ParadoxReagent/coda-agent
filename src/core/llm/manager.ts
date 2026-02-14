@@ -14,6 +14,10 @@ export interface ProviderSelection {
   originalProvider?: string;
 }
 
+export interface TierSelection extends ProviderSelection {
+  tier: "light" | "heavy";
+}
+
 export interface ProviderInfo {
   name: string;
   models: string[];
@@ -30,9 +34,19 @@ export class ProviderManager {
   private providerModels: Map<string, string[]> = new Map();
   private userPreferences: Map<string, { provider: string; model: string }> =
     new Map();
+  private userTierPreferences: Map<
+    string,
+    { light?: { provider: string; model: string }; heavy?: { provider: string; model: string } }
+  > = new Map();
   private defaultProvider: string;
   private defaultModel: string;
   private failoverChain: string[];
+  private tiersEnabled: boolean;
+  private tierConfig?: {
+    light: { provider: string; model: string };
+    heavy: { provider: string; model: string };
+    showTier: boolean;
+  };
   readonly usage: UsageTracker;
   private logger: Logger;
 
@@ -40,6 +54,14 @@ export class ProviderManager {
     this.defaultProvider = config.default_provider;
     this.defaultModel = config.default_model;
     this.failoverChain = config.failover_chain ?? [];
+    this.tiersEnabled = config.tiers?.enabled ?? false;
+    this.tierConfig = config.tiers?.enabled
+      ? {
+          light: config.tiers.light,
+          heavy: config.tiers.heavy,
+          showTier: config.tiers.show_tier ?? false,
+        }
+      : undefined;
     this.usage = new UsageTracker(
       config.cost_per_million_tokens,
       config.daily_spend_alert_threshold,
@@ -173,6 +195,146 @@ export class ProviderManager {
     this.userPreferences.set(userId, { provider: providerName, model });
   }
 
+  /** Get provider and model for a specific tier. */
+  async getForUserTiered(
+    userId: string,
+    tier: "light" | "heavy"
+  ): Promise<TierSelection> {
+    if (!this.tiersEnabled || !this.tierConfig) {
+      // Tiers disabled, fall back to regular getForUser
+      const selection = await this.getForUser(userId);
+      return { ...selection, tier };
+    }
+
+    // Check if user has a tier-specific preference
+    const tierPrefs = this.userTierPreferences.get(userId);
+    const tierPref = tierPrefs?.[tier];
+
+    const preferredProviderName = tierPref?.provider ?? this.tierConfig[tier].provider;
+    const preferredModel = tierPref?.model ?? this.tierConfig[tier].model;
+
+    // Check if preferred provider is available
+    const breaker = this.circuitBreakers.get(preferredProviderName);
+    if (breaker && breaker.canExecute()) {
+      const provider = this.providers.get(preferredProviderName);
+      if (provider) {
+        return { provider, model: preferredModel, tier };
+      }
+    }
+
+    // Failover: walk the chain
+    for (const fallbackName of this.failoverChain) {
+      if (fallbackName === preferredProviderName) continue;
+
+      const fallbackBreaker = this.circuitBreakers.get(fallbackName);
+      if (fallbackBreaker && !fallbackBreaker.canExecute()) continue;
+
+      const fallbackProvider = this.providers.get(fallbackName);
+      if (!fallbackProvider) continue;
+
+      const models = this.providerModels.get(fallbackName);
+      const fallbackModel = models?.[0] ?? preferredModel;
+
+      this.logger.warn(
+        {
+          userId,
+          tier,
+          originalProvider: preferredProviderName,
+          fallbackProvider: fallbackName,
+        },
+        "Failing over to alternate LLM provider for tier"
+      );
+
+      return {
+        provider: fallbackProvider,
+        model: fallbackModel,
+        tier,
+        failedOver: true,
+        originalProvider: preferredProviderName,
+      };
+    }
+
+    // Try all remaining providers
+    for (const [name, provider] of this.providers) {
+      if (name === preferredProviderName) continue;
+
+      const provBreaker = this.circuitBreakers.get(name);
+      if (provBreaker && !provBreaker.canExecute()) continue;
+
+      const models = this.providerModels.get(name);
+      const model = models?.[0] ?? preferredModel;
+
+      this.logger.warn(
+        { userId, tier, originalProvider: preferredProviderName, fallbackProvider: name },
+        "All failover chain providers unavailable for tier, using any available provider"
+      );
+
+      return {
+        provider,
+        model,
+        tier,
+        failedOver: true,
+        originalProvider: preferredProviderName,
+      };
+    }
+
+    // All providers down
+    throw new Error(
+      "All LLM providers are currently unavailable. Please try again later."
+    );
+  }
+
+  /** Set a user's tier-specific provider and model preference. */
+  setUserTierPreference(
+    userId: string,
+    tier: "light" | "heavy",
+    providerName: string,
+    model: string
+  ): void {
+    if (!this.providers.has(providerName)) {
+      throw new Error(`Provider "${providerName}" is not configured`);
+    }
+    const models = this.providerModels.get(providerName);
+    if (models && !models.includes(model)) {
+      throw new Error(
+        `Model "${model}" is not available for provider "${providerName}". Available: ${models.join(", ")}`
+      );
+    }
+
+    const existing = this.userTierPreferences.get(userId) ?? {};
+    existing[tier] = { provider: providerName, model };
+    this.userTierPreferences.set(userId, existing);
+  }
+
+  /** Check if tiers are enabled. */
+  isTierEnabled(): boolean {
+    return this.tiersEnabled;
+  }
+
+  /** Get tier configuration and user preferences for a user. */
+  getUserTierStatus(userId: string): {
+    enabled: boolean;
+    light?: { provider: string; model: string };
+    heavy?: { provider: string; model: string };
+    userPreferences?: {
+      light?: { provider: string; model: string };
+      heavy?: { provider: string; model: string };
+    };
+  } {
+    if (!this.tiersEnabled || !this.tierConfig) {
+      return { enabled: false };
+    }
+
+    const userPrefs = this.userTierPreferences.get(userId);
+
+    return {
+      enabled: true,
+      light: this.tierConfig.light,
+      heavy: this.tierConfig.heavy,
+      userPreferences: userPrefs,
+    };
+  }
+
   /** List all available providers and their models. */
   listProviders(): ProviderInfo[] {
     const result: ProviderInfo[] = [];
@@ -190,9 +352,10 @@ export class ProviderManager {
   async trackUsage(
     providerName: string,
     model: string,
-    usage: { inputTokens: number | null; outputTokens: number | null }
+    usage: { inputTokens: number | null; outputTokens: number | null },
+    tier?: "light" | "heavy"
   ): Promise<void> {
-    await this.usage.track(providerName, model, usage);
+    await this.usage.track(providerName, model, usage, tier);
   }
 
   /** Get a specific provider by name (for testing/internal use). */

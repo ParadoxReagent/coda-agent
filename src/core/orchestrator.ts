@@ -9,6 +9,8 @@ import type { NotesSkill } from "../skills/notes/skill.js";
 import type { MemorySkill } from "../skills/memory/skill.js";
 import type { AgentSkillDiscovery } from "../skills/agent-skill-discovery.js";
 import type { DoctorService } from "./doctor/doctor-service.js";
+import type { TierClassifier } from "./tier-classifier.js";
+import type { AppConfig } from "../utils/config.js";
 import { ResilientExecutor } from "./resilient-executor.js";
 import { withContext, createCorrelationId } from "./correlation.js";
 
@@ -19,6 +21,8 @@ const MAX_MESSAGE_LENGTH = 4000;
 export class Orchestrator {
   private agentSkillDiscovery?: AgentSkillDiscovery;
   private doctorService?: DoctorService;
+  private tierClassifier?: TierClassifier;
+  private sensitiveToolPolicy: "log" | "confirm_with_external" | "always_confirm";
 
   constructor(
     private providerManager: ProviderManager,
@@ -27,9 +31,13 @@ export class Orchestrator {
     readonly eventBus: EventBus,
     private confirmation: ConfirmationManager,
     private logger: Logger,
-    agentSkillDiscovery?: AgentSkillDiscovery
+    agentSkillDiscovery?: AgentSkillDiscovery,
+    tierClassifier?: TierClassifier,
+    securityConfig?: AppConfig["security"]
   ) {
     this.agentSkillDiscovery = agentSkillDiscovery;
+    this.tierClassifier = tierClassifier;
+    this.sensitiveToolPolicy = securityConfig?.sensitive_tool_policy ?? "log";
   }
 
   setDoctorService(doctorService: DoctorService): void {
@@ -67,9 +75,39 @@ export class Orchestrator {
       // 1. Load conversation context
       const history = await this.context.getHistory(userId, channel);
 
-      // 2. Get user's preferred provider + model (with failover)
-      const { provider, model, failedOver, originalProvider } =
-        await this.providerManager.getForUser(userId);
+      // 2. Classify message and get tier-appropriate provider + model
+      let currentTier: "light" | "heavy" | undefined;
+      let provider;
+      let model;
+      let failedOver;
+      let originalProvider;
+
+      if (this.tierClassifier && this.providerManager.isTierEnabled()) {
+        // Tiers enabled: classify message and route to appropriate tier
+        const classification = this.tierClassifier.classifyMessage(message);
+        currentTier = classification.tier;
+
+        this.logger.debug(
+          { userId, tier: currentTier, reason: classification.reason },
+          "Tier classification"
+        );
+
+        const tierSelection = await this.providerManager.getForUserTiered(
+          userId,
+          currentTier
+        );
+        provider = tierSelection.provider;
+        model = tierSelection.model;
+        failedOver = tierSelection.failedOver;
+        originalProvider = tierSelection.originalProvider;
+      } else {
+        // Tiers disabled: use regular provider selection
+        const selection = await this.providerManager.getForUser(userId);
+        provider = selection.provider;
+        model = selection.model;
+        failedOver = selection.failedOver;
+        originalProvider = selection.originalProvider;
+      }
 
       // 3. Build system prompt with available skills as tools
       const tools =
@@ -97,7 +135,8 @@ export class Orchestrator {
       await this.providerManager.trackUsage(
         provider.name,
         model,
-        response.usage
+        response.usage,
+        currentTier
       );
 
       // 7. Tool use loop
@@ -125,6 +164,43 @@ export class Orchestrator {
           userId,
           response.toolCalls
         );
+
+        // Check for tier escalation
+        if (
+          this.tierClassifier &&
+          currentTier === "light" &&
+          this.providerManager.isTierEnabled()
+        ) {
+          for (const tc of response.toolCalls) {
+            if (this.tierClassifier.shouldEscalate(tc.name)) {
+              this.logger.info(
+                { userId, toolName: tc.name, previousTier: currentTier },
+                "Escalating from light to heavy tier due to tool call"
+              );
+
+              // Escalate to heavy tier
+              currentTier = "heavy";
+              const tierSelection = await this.providerManager.getForUserTiered(
+                userId,
+                "heavy"
+              );
+              provider = tierSelection.provider;
+              model = tierSelection.model;
+
+              // Update tools if provider capabilities changed
+              const newTools =
+                provider.capabilities.tools !== false
+                  ? this.skills.getToolDefinitions()
+                  : undefined;
+              if (JSON.stringify(newTools) !== JSON.stringify(tools)) {
+                // Tools changed, but we can't retroactively change the conversation
+                // The next LLM call will use the new provider's tools
+              }
+
+              break; // Only escalate once
+            }
+          }
+        }
 
         // Build continuation messages with tool results
         const continuationBlocks: LLMContentBlock[] = [];
@@ -166,7 +242,8 @@ export class Orchestrator {
         await this.providerManager.trackUsage(
           provider.name,
           model,
-          response.usage
+          response.usage,
+          currentTier
         );
 
         // Update messages for potential next iteration
@@ -192,7 +269,7 @@ export class Orchestrator {
             maxTokens: 4096,
           });
 
-          await this.providerManager.trackUsage(provider.name, model, continuation.usage);
+          await this.providerManager.trackUsage(provider.name, model, continuation.usage, currentTier);
 
           if (continuation.text) {
             response = {
@@ -288,7 +365,14 @@ export class Orchestrator {
         const requiresConfirmation =
           this.skills.toolRequiresConfirmation(tc.name);
 
-        if (requiresConfirmation) {
+        // Check sensitive tool policy
+        const isSensitive = this.skills.isSensitiveTool(tc.name);
+        const sensitiveNeedsConfirmation =
+          isSensitive && this.sensitiveToolPolicy === "always_confirm";
+        // "confirm_with_external" is a future hook point — defaults to pass-through
+        // since email integration (the primary external content source) is removed
+
+        if (requiresConfirmation || sensitiveNeedsConfirmation) {
           const description = `${tc.name}(${JSON.stringify(tc.input)})`;
           const token = this.confirmation.createConfirmation(
             userId,
@@ -416,9 +500,8 @@ Sub-agent capabilities:
 
 Morning Briefing:
 When the user says "morning", "briefing", "good morning", or "/briefing":
-1. Call email_check for an email summary (if available)
-2. Call calendar_today for today's schedule (if available)
-3. Call reminder_list for pending reminders (if available)
+1. Call reminder_list for pending reminders (if available)
+2. Query n8n events for recent activity (if available)
 Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${this.buildAgentSkillsSection()}${notesSection}${memorySection}`;
   }
 

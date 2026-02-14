@@ -297,27 +297,123 @@ export class DiscordBot {
       }
 
       case "status": {
-        const { provider, model } =
-          await this.providerManager.getForUser(interaction.user.id);
-        const usage = this.providerManager.usage.getDailyUsage();
-        const cost = this.providerManager.usage.getTodayTotalCost();
+        const tiersEnabled = this.providerManager.isTierEnabled();
 
-        let usageText = "No usage today.";
-        if (usage.length > 0) {
-          const lines = usage.map((u) => {
-            const costStr = u.usageTracked
-              ? u.estimatedCost !== null
-                ? `$${u.estimatedCost.toFixed(4)}`
-                : "cost not configured"
-              : "usage not tracked";
-            return `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})`;
-          });
-          usageText = lines.join("\n");
+        if (tiersEnabled) {
+          // Tier-aware status
+          const tierStatus = this.providerManager.getUserTierStatus(interaction.user.id);
+          const tierUsage = this.providerManager.usage.getDailyUsageByTier();
+
+          let statusText = "**Tier Configuration**\n";
+          statusText += `Light: ${tierStatus.light?.provider}/${tierStatus.light?.model}\n`;
+          statusText += `Heavy: ${tierStatus.heavy?.provider}/${tierStatus.heavy?.model}\n`;
+
+          if (tierStatus.userPreferences?.light || tierStatus.userPreferences?.heavy) {
+            statusText += "\n**User Overrides**\n";
+            if (tierStatus.userPreferences.light) {
+              statusText += `Light: ${tierStatus.userPreferences.light.provider}/${tierStatus.userPreferences.light.model}\n`;
+            }
+            if (tierStatus.userPreferences.heavy) {
+              statusText += `Heavy: ${tierStatus.userPreferences.heavy.provider}/${tierStatus.userPreferences.heavy.model}\n`;
+            }
+          }
+
+          statusText += "\n**Today's Usage by Tier**\n";
+
+          const lightUsage = tierUsage.get("light");
+          const heavyUsage = tierUsage.get("heavy");
+
+          if (lightUsage && lightUsage.length > 0) {
+            statusText += "\nLight tier:\n";
+            for (const u of lightUsage) {
+              const costStr = u.usageTracked
+                ? u.estimatedCost !== null
+                  ? `$${u.estimatedCost.toFixed(4)}`
+                  : "cost not configured"
+                : "usage not tracked";
+              statusText += `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})\n`;
+            }
+          }
+
+          if (heavyUsage && heavyUsage.length > 0) {
+            statusText += "\nHeavy tier:\n";
+            for (const u of heavyUsage) {
+              const costStr = u.usageTracked
+                ? u.estimatedCost !== null
+                  ? `$${u.estimatedCost.toFixed(4)}`
+                  : "cost not configured"
+                : "usage not tracked";
+              statusText += `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})\n`;
+            }
+          }
+
+          if ((!lightUsage || lightUsage.length === 0) && (!heavyUsage || heavyUsage.length === 0)) {
+            statusText += "No usage today.\n";
+          }
+
+          const cost = this.providerManager.usage.getTodayTotalCost();
+          if (cost !== null) {
+            statusText += `\nTotal estimated cost: $${cost.toFixed(4)}`;
+          }
+
+          await interaction.reply(statusText);
+        } else {
+          // Legacy non-tier status
+          const { provider, model } =
+            await this.providerManager.getForUser(interaction.user.id);
+          const usage = this.providerManager.usage.getDailyUsage();
+          const cost = this.providerManager.usage.getTodayTotalCost();
+
+          let usageText = "No usage today.";
+          if (usage.length > 0) {
+            const lines = usage.map((u) => {
+              const costStr = u.usageTracked
+                ? u.estimatedCost !== null
+                  ? `$${u.estimatedCost.toFixed(4)}`
+                  : "cost not configured"
+                : "usage not tracked";
+              return `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})`;
+            });
+            usageText = lines.join("\n");
+          }
+
+          await interaction.reply(
+            `**Current Model**\nProvider: ${provider.name}\nModel: ${model}\nCapabilities: tools=${provider.capabilities.tools}, parallel=${provider.capabilities.parallelToolCalls}\n\n**Today's Usage**\n${usageText}${cost !== null ? `\n\nTotal estimated cost: $${cost.toFixed(4)}` : ""}`
+          );
+        }
+        break;
+      }
+
+      case "tier": {
+        const tier = interaction.options.getString("tier") as "light" | "heavy" | null;
+        const provider = interaction.options.getString("provider");
+        const model = interaction.options.getString("model");
+
+        if (!tier || !provider || !model) {
+          await interaction.reply("Usage: /model tier <light|heavy> <provider> <model>");
+          return;
         }
 
-        await interaction.reply(
-          `**Current Model**\nProvider: ${provider.name}\nModel: ${model}\nCapabilities: tools=${provider.capabilities.tools}, parallel=${provider.capabilities.parallelToolCalls}\n\n**Today's Usage**\n${usageText}${cost !== null ? `\n\nTotal estimated cost: $${cost.toFixed(4)}` : ""}`
-        );
+        if (!this.providerManager.isTierEnabled()) {
+          await interaction.reply("Tiers are not enabled in the configuration.");
+          return;
+        }
+
+        try {
+          this.providerManager.setUserTierPreference(
+            interaction.user.id,
+            tier,
+            provider,
+            model
+          );
+          await interaction.reply(
+            `Set ${tier} tier to **${provider}** / **${model}**`
+          );
+        } catch (err) {
+          await interaction.reply(
+            `Error: ${err instanceof Error ? err.message : "Unknown error"}`
+          );
+        }
         break;
       }
     }
@@ -474,6 +570,33 @@ export class DiscordBot {
           sub
             .setName("status")
             .setDescription("Show current provider, model, and usage")
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("tier")
+            .setDescription("Set tier-specific provider and model")
+            .addStringOption((opt) =>
+              opt
+                .setName("tier")
+                .setDescription("Tier (light or heavy)")
+                .setRequired(true)
+                .addChoices(
+                  { name: "light", value: "light" },
+                  { name: "heavy", value: "heavy" }
+                )
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName("provider")
+                .setDescription("Provider name")
+                .setRequired(true)
+            )
+            .addStringOption((opt) =>
+              opt
+                .setName("model")
+                .setDescription("Model name")
+                .setRequired(true)
+            )
         ),
 
       new SlashCommandBuilder()

@@ -203,8 +203,12 @@ if [ ! -f config/config.example.yaml ]; then
     exit 1
 fi
 
-# Copy the example config
-cp config/config.example.yaml config/config.yaml
+# Only copy example config if config.yaml doesn't exist yet
+if [ -f config/config.yaml ]; then
+    echo -e "${GREEN}✓ Using existing config.yaml (not overwriting)${NC}"
+else
+    cp config/config.example.yaml config/config.yaml
+fi
 
 # Update default provider based on what API key is provided
 if [ -n "$OPENROUTER_API_KEY" ]; then

@@ -212,8 +212,10 @@ export class SubagentManager {
     const runId = crypto.randomUUID();
     const abortController = new AbortController();
 
-    // Get provider/model for user
-    const { provider, model } = await this.providerManager.getForUser(userId);
+    // Get provider/model for user (use heavy tier if tiers are enabled)
+    const { provider, model } = this.providerManager.isTierEnabled()
+      ? await this.providerManager.getForUserTiered(userId, "heavy")
+      : await this.providerManager.getForUser(userId);
 
     const systemPrompt = options.workerInstructions ??
       `You are a sub-agent assistant. Complete the following task efficiently using the tools available to you. Be concise and focused.`;
@@ -436,10 +438,14 @@ export class SubagentManager {
     record.startedAt = new Date();
 
     try {
-      // Get provider/model
+      // Get provider/model (use heavy tier if tiers are enabled)
       const { provider, model } = record.model && record.provider
-        ? { provider: (await this.providerManager.getForUser(record.userId)).provider, model: record.model }
-        : await this.providerManager.getForUser(record.userId);
+        ? { provider: (this.providerManager.isTierEnabled()
+            ? await this.providerManager.getForUserTiered(record.userId, "heavy")
+            : await this.providerManager.getForUser(record.userId)).provider, model: record.model }
+        : this.providerManager.isTierEnabled()
+          ? await this.providerManager.getForUserTiered(record.userId, "heavy")
+          : await this.providerManager.getForUser(record.userId);
 
       record.model = model;
       record.provider = provider.name;
@@ -457,7 +463,7 @@ export class SubagentManager {
           model,
           allowedSkills: record.allowedTools
             ? this.resolveSkillsFromToolNames(record.allowedTools)
-            : undefined,
+            : this.resolveSkillsFromToolNames(this.config.safe_default_tools),
           blockedTools: record.blockedTools ?? undefined,
           isSubagent: true,
           maxToolCalls: this.config.max_tool_calls_per_run,

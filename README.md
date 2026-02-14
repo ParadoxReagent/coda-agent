@@ -2,21 +2,20 @@
 
 **Current Status: Phase 3 Event Infrastructure Complete**
 
-coda is a personal AI assistant that lives in Discord and manages your digital life. It connects to your email, calendar, and notes — and can deliver a morning briefing with a single message. Phase 3 adds a durable event-driven backbone with proactive alerts and scheduled tasks.
+coda is a personal AI assistant that lives in Discord and manages your digital life. It connects to your notes, reminders, and external services via n8n — and can deliver a morning briefing with a single message. Phase 3 adds a durable event-driven backbone with proactive alerts and scheduled tasks.
 
 ## What Works Now
 
 - Multi-provider LLM support (Anthropic, Google Gemini, OpenAI, OpenRouter, Ollama)
+- **Dual LLM Tier Routing** — Automatic cost optimization with light/heavy model routing (simple requests use cheap models, complex tasks auto-escalate)
 - Discord bot with natural language + slash commands
 - Conversation context tracking
 - Provider switching at runtime
-- Token usage tracking
-- **Email** — IMAP polling, automatic categorization (urgent/needs response/informational/low priority), urgent email alerts
-- **Calendar** — CalDAV integration, view today/upcoming events, create events with conflict detection, search
+- Token usage tracking with per-tier cost breakdowns
 - **Reminders** — Natural language time parsing ("in 2 hours", "every Monday at 9am"), background due-reminder alerts, snooze
 - **Notes** — Full-text search, tagging, `context:always` notes injected into every conversation
 - **Memory** — Semantic vector search (pgvector + sentence-transformers), auto-injected context, LLM-driven save/search
-- **Morning Briefing** — Say "good morning" and get an email summary, today's schedule, and pending reminders in one response
+- **Morning Briefing** — Say "good morning" and get a summary of pending reminders, notes, and n8n events in one response
 - **Redis Streams Event Bus** — Durable at-least-once event delivery with consumer groups, idempotency, and dead letter queue
 - **Alert Router** — Configurable routing rules, quiet hours, per-event cooldowns, severity levels, and alert history audit trail
 - **Task Scheduler** — Cron-based scheduled tasks with retry, config overrides, and runtime enable/disable via Discord
@@ -148,15 +147,6 @@ OPENROUTER_API_KEY=sk-or-...
 DATABASE_URL=postgresql://coda:coda@localhost:5432/coda
 REDIS_URL=redis://localhost:6379
 
-# Optional: Email (IMAP)
-IMAP_HOST=imap.gmail.com
-IMAP_USER=you@gmail.com
-IMAP_PASS=your_app_password
-
-# Optional: Calendar (CalDAV)
-CALDAV_SERVER_URL=https://caldav.example.com
-CALDAV_USERNAME=you@example.com
-CALDAV_PASSWORD=your_password
 ```
 
 ### 4. Start Infrastructure
@@ -193,8 +183,6 @@ Go to your Discord channel and:
 You: Good morning!
 Bot: Good morning! Here's your briefing:
 
-📧 Email: 12 new emails (2 urgent from boss@company.com)
-📅 Calendar: 3 events today — Team standup at 9am, 1:1 with Jane at 2pm, Sprint review at 4pm
 ⏰ Reminders: 2 pending — Call dentist (due 2pm), Submit report (due 5pm)
 
 You: Remind me to pick up groceries in 2 hours
@@ -211,12 +199,12 @@ Bot: Found 1 note: "The WiFi password for the office is sunshine42"
 
 coda has three types of capabilities: **integrations** (external service connectors), **built-in skills** (agent abilities), and **agent skills** (community/custom instruction-based skills).
 
-- **[Integrations](integrations_readme.md)** — Email, Calendar, n8n, Firecrawl (web scraping/search)
+- **[Integrations](integrations_readme.md)** — n8n, Firecrawl (web scraping/search)
 - **[Skills](skills_readme.md)** — Reminders, Notes, Memory, Scheduler, Agent Skills (community/custom)
 
 ### Morning Briefing
 
-Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available integrations and skills. Works gracefully when some are not configured.
+Say "morning", "good morning", "briefing", or "/briefing" and coda composes a natural summary from all available skills and integrations. Works gracefully when some are not configured.
 
 ### Alert Routing
 
@@ -225,11 +213,6 @@ Alerts are routed through configurable rules in `config.yaml`. Each event type c
 ```yaml
 alerts:
   rules:
-    "alert.email.urgent":
-      severity: "high"
-      channels: ["discord"]
-      quietHours: true
-      cooldown: 300
     "alert.reminder.due":
       severity: "medium"
       channels: ["discord"]
@@ -268,8 +251,8 @@ High-severity alerts override quiet hours by default. All alerts (delivered and 
 └───┬────┘   └─────────┘   └────────────────┘
     │
 ┌───▼─────────────────────────────────────────────────┐
-│  Email │ Calendar │ Reminders │ Notes │ Memory│ Sched│
-│  IMAP  │  CalDAV  │ chrono    │  DB   │vectors│ cron │
+│  Reminders │ Notes │ Memory │ Sched │ n8n │ Firecrawl │
+│  chrono    │  DB   │vectors │ cron  │     │           │
 └──────────────────────────────────┬──────────────────┘
     │              │               │
     │              │    ┌──────────▼──────────┐
@@ -298,6 +281,53 @@ High-severity alerts override quiet hours by default. All alerts (delivered and 
 ```
 
 ## LLM Provider Configuration
+
+### Dual LLM Tier Routing (Cost Optimization)
+
+Significantly reduce LLM costs by using a cheap "light" model (e.g., Haiku) for simple requests and automatically escalating to a capable "heavy" model (e.g., Sonnet) only when needed.
+
+**How it works:**
+- Every request starts with the light tier
+- Simple tasks (notes, reminders, lookups) complete on the light model
+- Complex patterns ("research", "analyze") or heavy tools (subagents, web crawling) trigger automatic escalation to heavy tier
+- Only a few hundred cheap tokens are "wasted" on the initial light model call
+
+**Configuration** (`config.yaml`):
+
+```yaml
+llm:
+  tiers:
+    enabled: true
+    light:
+      provider: "anthropic"
+      model: "claude-haiku-3-5-20241022"
+    heavy:
+      provider: "anthropic"
+      model: "claude-sonnet-4-5-20250514"
+    heavy_tools:
+      - "delegate_to_subagent"
+      - "firecrawl_search"
+      - "skill_activate"
+    heavy_patterns:
+      - "research"
+      - "analyze"
+      - "compare"
+    heavy_message_length: 800
+```
+
+**Environment variable overrides:**
+```bash
+TIER_ENABLED=true
+TIER_LIGHT_MODEL=claude-haiku-3-5-20241022
+TIER_HEAVY_MODEL=claude-sonnet-4-5-20250514
+```
+
+**User commands:**
+- `/model tier light <provider> <model>` - Override light tier model
+- `/model tier heavy <provider> <model>` - Override heavy tier model
+- `/model status` - View tier configuration and per-tier usage/costs
+
+Tiers are **opt-in** (disabled by default). All existing behavior is preserved when tiers are disabled.
 
 ### Anthropic Claude (Recommended)
 
@@ -347,8 +377,9 @@ Then use `/model set openrouter anthropic/claude-sonnet-4-5` to switch.
 - `/status` - Show loaded skills and their status
 - `/help` - List available skills and what they can do
 - `/model list` - Show all configured LLM providers and models
-- `/model set <provider> <model>` - Switch to a different provider/model
-- `/model status` - Show current provider, model, capabilities, and today's token usage
+- `/model set <provider> <model>` - Switch to a different provider/model (sets both tiers when tier routing is enabled)
+- `/model tier <light|heavy> <provider> <model>` - Set tier-specific model (requires tier routing enabled)
+- `/model status` - Show current provider, model, capabilities, and today's token usage (includes per-tier breakdown when tiers enabled)
 
 ## Development Commands
 
@@ -426,8 +457,6 @@ Database migrations run automatically on every startup — no manual `pnpm db:mi
 - 85 tests
 
 ### Phase 2: MVP Skills (Complete)
-- Email skill (IMAP polling, rules-based categorization, urgent alerts)
-- Calendar skill (CalDAV integration, conflict detection)
 - Reminders skill (natural language time parsing, recurring, background checker)
 - Notes skill (full-text search, tagging, context:always injection)
 - Morning briefing (orchestrated multi-skill summary)
@@ -468,8 +497,7 @@ Database migrations run automatically on every startup — no manual `pnpm db:mi
 
 ### Skills not loading
 
-1. Email and Calendar require external service config — check env vars or `config.yaml`
-2. Notes and Reminders always load (they only need PostgreSQL)
+1. Notes and Reminders always load (they only need PostgreSQL)
 3. Check logs for "Skill registered" or "missing required config" messages
 
 ### "No LLM providers available"
@@ -491,7 +519,7 @@ pnpm run lint
 
 ## Documentation
 
-- [Integrations](integrations_readme.md) — Email, Calendar, n8n, Firecrawl
+- [Integrations](integrations_readme.md) — n8n, Firecrawl
 - [Skills](skills_readme.md) — Reminders, Notes, Memory, Scheduler, Agent Skills
 - [Architecture Overview](personal-assistant-architecture.md)
 - [Phase 1 Plan](phase-1-foundation.md)

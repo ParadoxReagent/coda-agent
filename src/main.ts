@@ -23,18 +23,18 @@ import { initializeDatabase } from "./db/connection.js";
 import { runMigrations } from "./db/migrate.js";
 import { NotesSkill } from "./skills/notes/skill.js";
 import { ReminderSkill } from "./skills/reminders/skill.js";
-import { CalendarSkill } from "./integrations/calendar/skill.js";
-import { EmailSkill } from "./integrations/email/skill.js";
 import { SchedulerSkill } from "./skills/scheduler/skill.js";
 import { N8nSkill } from "./integrations/n8n/skill.js";
 import { MemorySkill } from "./skills/memory/skill.js";
 import { FirecrawlSkill } from "./integrations/firecrawl/skill.js";
+import { WeatherSkill } from "./integrations/weather/skill.js";
 import { SubagentSkill } from "./skills/subagents/skill.js";
 import { AgentSkillDiscovery } from "./skills/agent-skill-discovery.js";
 import { AgentSkillsSkill } from "./skills/agent-skills/skill.js";
 import { DoctorService } from "./core/doctor/doctor-service.js";
 import { DoctorSkill } from "./skills/doctor/skill.js";
 import { SubagentManager } from "./core/subagent-manager.js";
+import { TierClassifier } from "./core/tier-classifier.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
@@ -49,10 +49,9 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
   const sectionMap: Record<string, unknown> = {
     notes: config.notes,
     reminders: config.reminders,
-    calendar: config.calendar,
-    email: config.email,
     memory: config.memory,
     firecrawl: config.firecrawl,
+    weather: config.weather,
     n8n: {},
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
@@ -64,6 +63,13 @@ async function main() {
   // 1. Load configuration
   const config = loadConfig();
   logger.info("Configuration loaded");
+
+  // Security: warn if default database credentials detected
+  if (config.database.url.includes("coda:coda")) {
+    logger.warn(
+      "Default database credentials detected (coda:coda) — change them for production!"
+    );
+  }
 
   // 2. Initialize database
   const { db, client: dbClient } = createDatabase(config.database.url);
@@ -161,24 +167,6 @@ async function main() {
   skillRegistry.register(new SchedulerSkill(taskScheduler));
   skillRegistry.register(new N8nSkill());
 
-  // Calendar registers conditionally (requires CalDAV config)
-  if (config.calendar) {
-    try {
-      skillRegistry.register(new CalendarSkill(), { caldav: config.calendar });
-    } catch (err) {
-      logger.warn({ error: err }, "Calendar skill not registered — missing config");
-    }
-  }
-
-  // Email registers conditionally (requires OAuth or IMAP config)
-  if (config.email) {
-    try {
-      skillRegistry.register(new EmailSkill(), config.email);
-    } catch (err) {
-      logger.warn({ error: err }, "Email skill not registered — missing config");
-    }
-  }
-
   // Memory registers conditionally (requires API key)
   if (config.memory) {
     try {
@@ -194,6 +182,15 @@ async function main() {
       skillRegistry.register(new FirecrawlSkill(), config.firecrawl);
     } catch (err) {
       logger.warn({ error: err }, "Firecrawl skill not registered — missing config");
+    }
+  }
+
+  // Weather registers conditionally (no API key required, just config)
+  if (config.weather) {
+    try {
+      skillRegistry.register(new WeatherSkill(), config.weather);
+    } catch (err) {
+      logger.warn({ error: err }, "Weather skill not registered — missing config");
     }
   }
 
@@ -239,7 +236,11 @@ async function main() {
     skillRegistry.register(new AgentSkillsSkill(agentSkillDiscovery));
   }
 
-  // 8. Create orchestrator
+  // 8. Create orchestrator with optional tier classifier
+  const tierClassifier = config.llm.tiers?.enabled
+    ? new TierClassifier(config.llm.tiers)
+    : undefined;
+
   const orchestrator = new Orchestrator(
     providerManager,
     skillRegistry,
@@ -247,7 +248,9 @@ async function main() {
     eventBus,
     confirmationManager,
     logger,
-    agentSkillDiscovery
+    agentSkillDiscovery,
+    tierClassifier,
+    config.security
   );
 
   // 8a. Initialize DoctorService
@@ -383,6 +386,9 @@ async function main() {
     redis,
     skillHealth: skillHealthTracker,
     providerManager,
+  }, {
+    apiKey: config.server.api_key,
+    requireAuthForHealth: config.server.require_auth_for_health,
   });
   await restApi.start(config.server.port, config.server.host);
 

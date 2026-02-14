@@ -180,26 +180,6 @@ export const alertHistory = pgTable(
   ]
 );
 
-/** OAuth tokens for external service authentication. */
-export const oauthTokens = pgTable(
-  "oauth_tokens",
-  {
-    id: serial("id").primaryKey(),
-    service: varchar("service", { length: 50 }).notNull(),
-    userId: varchar("user_id", { length: 255 }).notNull(),
-    accessToken: text("access_token").notNull(),
-    refreshToken: text("refresh_token").notNull(),
-    tokenType: varchar("token_type", { length: 50 }).default("Bearer").notNull(),
-    expiryDate: timestamp("expiry_date", { withTimezone: true }).notNull(),
-    scope: text("scope").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table) => [
-    uniqueIndex("oauth_tokens_service_user_idx").on(table.service, table.userId),
-  ]
-);
-
 /** User preferences for DND, quiet hours, alerts. */
 export const userPreferences = pgTable(
   "user_preferences",
