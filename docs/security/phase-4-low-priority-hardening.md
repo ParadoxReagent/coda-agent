@@ -1,7 +1,7 @@
 # Phase 4: Low-Priority Security Hardening
 
 **Priority:** Within 2-3 months
-**Findings:** 5 LOW
+**Findings:** 4 LOW
 **Estimated effort:** 1-2 days
 
 ---
@@ -134,32 +134,3 @@ Option B: Create an `audit_log` database table for persistent tracking.
 
 - `src/interfaces/discord-bot.ts`
 - Optionally `src/db/schema.ts` (new table)
-
----
-
-## Finding 27: IMAP Credentials in Config File
-
-**Severity:** LOW
-
-### Vulnerability
-
-IMAP username and password can be specified directly in `config.yaml`, which may be committed to version control or readable by other processes.
-
-### File
-
-`src/utils/config.ts:76-78`
-
-### Fix
-
-1. Document that IMAP credentials should use env vars (`IMAP_USER`, `IMAP_PASS`)
-2. Add a startup warning if IMAP credentials appear in the YAML file rather than env vars:
-   ```typescript
-   if (config.email?.imap_pass && !process.env.IMAP_PASS) {
-     logger.warn("IMAP password found in config file. Use IMAP_PASS env var for better security.");
-   }
-   ```
-
-### Files to Modify
-
-- `src/main.ts` (add warning)
-- `config/config.example.yaml` (add documentation comment)

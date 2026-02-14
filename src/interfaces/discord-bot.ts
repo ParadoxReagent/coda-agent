@@ -15,6 +15,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import type { Logger } from "../utils/logger.js";
 import type { PreferencesManager } from "../core/preferences.js";
 import type { SubagentManager } from "../core/subagent-manager.js";
+import { ContentSanitizer } from "../core/sanitizer.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -135,8 +136,11 @@ export class DiscordBot {
         "discord"
       );
 
+      // Sanitize output to prevent mass mentions and invite spam
+      const sanitized = ContentSanitizer.sanitizeForDiscord(response);
+
       // Handle long responses (Discord 2000 char limit)
-      for (const chunk of chunkResponse(response, 1900)) {
+      for (const chunk of chunkResponse(sanitized, 1900)) {
         await channel.send(chunk);
       }
     } catch (err) {

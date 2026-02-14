@@ -5,6 +5,7 @@ import type { Logger } from "../utils/logger.js";
 import { ToolInputValidator } from "../core/tool-validator.js";
 import type { SkillHealthTracker } from "../core/skill-health.js";
 import type { RateLimiter } from "../core/rate-limiter.js";
+import { ContentSanitizer } from "../core/sanitizer.js";
 
 interface RegisteredSkill {
   skill: Skill;
@@ -229,8 +230,9 @@ export class SkillRegistry {
         "Tool call failed"
       );
 
-      // Return user-friendly error without stack trace
-      return `Error executing ${toolName}: ${error.message}`;
+      // Return user-friendly error with sanitized message
+      const sanitized = ContentSanitizer.sanitizeErrorMessage(error.message);
+      return `Error executing ${toolName}: ${sanitized}`;
     }
   }
 

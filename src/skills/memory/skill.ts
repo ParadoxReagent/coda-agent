@@ -47,6 +47,10 @@ export class MemorySkill implements Skill {
               description:
                 "Importance from 0 to 1 (default 0.5). Use higher values for critical facts.",
             },
+            user_id: {
+              type: "string",
+              description: "Optional user ID to scope the memory to a specific user",
+            },
           },
           required: ["content", "content_type"],
         },
@@ -77,6 +81,10 @@ export class MemorySkill implements Skill {
               type: "number",
               description: "Max results (default 10)",
             },
+            user_id: {
+              type: "string",
+              description: "Optional user ID to scope the search to a specific user",
+            },
           },
           required: ["query"],
         },
@@ -96,6 +104,10 @@ export class MemorySkill implements Skill {
             max_tokens: {
               type: "number",
               description: "Token budget for context (default 1500)",
+            },
+            user_id: {
+              type: "string",
+              description: "Optional user ID to scope the context to a specific user",
             },
           },
           required: ["query"],
@@ -192,11 +204,12 @@ export class MemorySkill implements Skill {
    */
   async getRelevantMemories(
     query: string,
-    maxTokens?: number
+    maxTokens?: number,
+    userId?: string
   ): Promise<string | null> {
     if (!this.contextInjectionEnabled) return null;
 
-    const cacheKey = `ctx:${this.hashQuery(query)}`;
+    const cacheKey = `ctx:${userId ?? 'anon'}:${this.hashQuery(query)}`;
     try {
       const cached = await this.redis.get(cacheKey);
       if (cached) return cached;
@@ -204,6 +217,7 @@ export class MemorySkill implements Skill {
       const response = await this.client.context({
         query,
         max_tokens: maxTokens ?? this.contextMaxTokens,
+        user_id: userId,
       });
 
       if (!response.context) return null;

@@ -84,6 +84,19 @@ async function main() {
   const redis = new Redis(config.redis.url);
   logger.info("Redis connected");
 
+  // Security: warn if Redis URL does not include authentication
+  try {
+    const redisUrl = new URL(config.redis.url);
+    if (!redisUrl.password && !redisUrl.username) {
+      logger.warn(
+        "Redis connection does not include authentication. " +
+        "Use format: redis://:password@host:port or redis://user:password@host:port"
+      );
+    }
+  } catch {
+    // Ignore URL parse errors (already validated by config schema)
+  }
+
   // 4. Initialize core services
   const skillHealthTracker = new SkillHealthTracker();
 
@@ -229,7 +242,10 @@ async function main() {
   const builtinAgentSkillsDir = join(__dirname, "skills", "agent-skills");
   const agentSkillDirs = [builtinAgentSkillsDir, ...config.skills.agent_skill_dirs];
 
-  const agentSkillDiscovery = new AgentSkillDiscovery(logger);
+  const agentSkillDiscovery = new AgentSkillDiscovery(
+    logger,
+    config.skills.allow_executable_resources
+  );
   agentSkillDiscovery.scanDirectories(agentSkillDirs);
 
   if (agentSkillDiscovery.getSkillMetadataList().length > 0) {
@@ -286,6 +302,14 @@ async function main() {
     max_token_budget: 200000,
     spawn_rate_limit: { max_requests: 10, window_seconds: 3600 },
     cleanup_interval_seconds: 60,
+    safe_default_tools: [
+      "firecrawl_scrape",
+      "firecrawl_search",
+      "firecrawl_map",
+      "note_save",
+      "note_search",
+    ],
+    restricted_tools: [],
   };
 
   const subagentManager = new SubagentManager(

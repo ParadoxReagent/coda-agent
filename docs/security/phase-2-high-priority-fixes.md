@@ -55,7 +55,7 @@ Firecrawl scrape results (web page content) are returned as raw tool results wit
 
 ---
 
-## Finding 8: External Skill Signature Verification NOT Implemented
+## Finding 8: External Skill Signature Verification
 
 **OWASP Category:** LLM03 — Supply Chain
 **Severity:** HIGH

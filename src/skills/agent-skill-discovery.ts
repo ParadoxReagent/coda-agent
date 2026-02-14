@@ -11,11 +11,21 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 /** Directories within an agent skill that may contain supplementary resources. */
 const RESOURCE_DIRS = ["scripts", "references", "assets"] as const;
 
-/** File extensions allowed for resource reads. */
-const ALLOWED_RESOURCE_EXTENSIONS = new Set([
+/** Safe data file extensions that cannot execute code. */
+const DATA_EXTENSIONS = new Set([
   ".md", ".txt", ".json", ".yaml", ".yml",
-  ".sh", ".py", ".js", ".ts",
   ".csv", ".toml", ".xml",
+]);
+
+/** Executable file extensions that may contain code. */
+const EXECUTABLE_EXTENSIONS = new Set([
+  ".sh", ".py", ".js", ".ts",
+]);
+
+/** All allowed resource extensions (data + executable). */
+const ALLOWED_RESOURCE_EXTENSIONS = new Set([
+  ...DATA_EXTENSIONS,
+  ...EXECUTABLE_EXTENSIONS,
 ]);
 
 export interface AgentSkillMetadata {
@@ -35,9 +45,11 @@ export class AgentSkillDiscovery {
   private activated = new Set<string>();
   private logger: Logger;
   private scannedDirs: string[] = [];
+  private allowExecutableResources: boolean;
 
-  constructor(logger: Logger) {
+  constructor(logger: Logger, allowExecutableResources = true) {
     this.logger = logger;
+    this.allowExecutableResources = allowExecutableResources;
   }
 
   /**
@@ -211,10 +223,25 @@ export class AgentSkillDiscovery {
       throw new Error(`Resource must be in one of: ${RESOURCE_DIRS.join(", ")}`);
     }
 
-    // Validate extension
+    // Validate extension based on config
     const ext = extname(normalized).toLowerCase();
-    if (!ALLOWED_RESOURCE_EXTENSIONS.has(ext)) {
+    const isExecutable = EXECUTABLE_EXTENSIONS.has(ext);
+    const isData = DATA_EXTENSIONS.has(ext);
+
+    if (!isData && !isExecutable) {
       throw new Error(`File extension "${ext}" is not allowed`);
+    }
+
+    if (isExecutable && !this.allowExecutableResources) {
+      throw new Error(`Executable resource "${ext}" is not allowed (allow_executable_resources is disabled)`);
+    }
+
+    // Log warning when reading executable resources
+    if (isExecutable) {
+      this.logger.warn(
+        { skill: name, resource: resourcePath, extension: ext },
+        "Reading executable resource file"
+      );
     }
 
     const fullPath = resolve(meta.dirPath, normalized);

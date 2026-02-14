@@ -1,6 +1,7 @@
 import { App } from "@slack/bolt";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { Logger } from "../utils/logger.js";
+import { ContentSanitizer } from "../core/sanitizer.js";
 
 interface SlackBotConfig {
   appToken: string;
@@ -105,10 +106,13 @@ export class SlackBot {
           "slack"
         );
 
+        // Sanitize output to prevent channel-wide mentions
+        const sanitized = ContentSanitizer.sanitizeForSlack(response);
+
         // Reply in thread if this was in a thread, otherwise start a new thread
         const replyThread = threadTs ?? ts;
 
-        for (const chunk of chunkResponse(response, 3000)) {
+        for (const chunk of chunkResponse(sanitized, 3000)) {
           await say({
             text: chunk,
             thread_ts: replyThread,

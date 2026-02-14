@@ -6,6 +6,7 @@ export interface MemoryIngestRequest {
   source_type?: string;
   source_id?: string;
   metadata?: Record<string, unknown>;
+  user_id?: string;
 }
 
 export interface MemoryIngestResponse {
@@ -21,6 +22,7 @@ export interface MemorySearchRequest {
   limit?: number;
   min_similarity?: number;
   include_archived?: boolean;
+  user_id?: string;
 }
 
 export interface MemorySearchResult {
@@ -45,6 +47,7 @@ export interface MemoryContextRequest {
   query: string;
   max_tokens?: number;
   content_types?: string[];
+  user_id?: string;
 }
 
 export interface MemoryContextResponse {

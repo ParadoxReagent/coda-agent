@@ -95,4 +95,51 @@ export class ContentSanitizer {
       "</subagent_result>",
     ].join("\n");
   }
+
+  /** Sanitize output for Discord to prevent mass mentions and invite spam. */
+  static sanitizeForDiscord(text: string): string {
+    if (!text) return "";
+    return text
+      // Break @everyone and @here with zero-width space
+      .replace(/@(everyone|here)/gi, "@\u200B$1")
+      // Remove Discord invite links
+      .replace(/discord\.gg\/\S+/gi, "[invite link removed]")
+      .replace(/discord\.com\/invite\/\S+/gi, "[invite link removed]");
+  }
+
+  /** Sanitize output for Slack to prevent channel-wide mentions. */
+  static sanitizeForSlack(text: string): string {
+    if (!text) return "";
+    return text
+      // Break @channel, @here, @everyone with zero-width space
+      .replace(/@(channel|here|everyone)/gi, "@\u200B$1")
+      // Escape special mention patterns
+      .replace(/<!everyone>/gi, "&lt;!everyone&gt;")
+      .replace(/<!channel>/gi, "&lt;!channel&gt;")
+      .replace(/<!here>/gi, "&lt;!here&gt;");
+  }
+
+  /** Sanitize error messages to remove sensitive information. */
+  static sanitizeErrorMessage(message: string): string {
+    if (!message) return "";
+    let sanitized = message
+      // Strip file paths (e.g., /path/to/file.ts:123)
+      .replace(/\/[\w\-./]+\.(ts|js|py|sh|json|yaml|yml)(:\d+)?/gi, "[file path]")
+      // Strip Windows paths (e.g., C:\path\to\file.ts:123)
+      .replace(/[A-Z]:\\[\w\-\\]+\.(ts|js|py|sh|json|yaml|yml)(:\d+)?/gi, "[file path]")
+      // Strip stack trace lines (at ...)
+      .replace(/\s+at\s+.+$/gm, "")
+      // Strip connection strings
+      .replace(/postgresql:\/\/[^\s]+/gi, "[database connection]")
+      .replace(/redis:\/\/[^\s]+/gi, "[redis connection]")
+      .replace(/mongodb:\/\/[^\s]+/gi, "[database connection]")
+      .replace(/mysql:\/\/[^\s]+/gi, "[database connection]");
+
+    // Truncate to 200 characters
+    if (sanitized.length > 200) {
+      sanitized = sanitized.substring(0, 200) + "...";
+    }
+
+    return sanitized.trim();
+  }
 }

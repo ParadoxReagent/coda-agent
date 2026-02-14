@@ -25,6 +25,7 @@ interface ContextFact {
 export class ContextStore {
   private history: Map<string, StoredMessage[]> = new Map();
   private facts: Map<string, ContextFact[]> = new Map();
+  private sessionToolCalls: Map<string, { count: number; resetAt: number }> = new Map();
   private logger: Logger;
 
   constructor(logger: Logger) {
@@ -131,6 +132,45 @@ export class ContextStore {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Check session-wide tool call limit with 1-hour sliding window.
+   * @param userId User identifier
+   * @param channel Channel identifier
+   * @param increment If true, increment the count
+   * @param maxCalls Maximum allowed calls per session
+   * @returns true if within limit, false if exceeded
+   */
+  checkSessionToolCalls(
+    userId: string,
+    channel: string,
+    increment: boolean,
+    maxCalls: number
+  ): boolean {
+    const key = `${userId}:${channel}`;
+    const now = Date.now();
+    const oneHour = 60 * 60 * 1000;
+
+    let session = this.sessionToolCalls.get(key);
+
+    // Reset if expired (1-hour sliding window)
+    if (!session || now > session.resetAt) {
+      session = { count: 0, resetAt: now + oneHour };
+      this.sessionToolCalls.set(key, session);
+    }
+
+    // Check limit
+    if (session.count >= maxCalls) {
+      return false;
+    }
+
+    // Increment if requested
+    if (increment) {
+      session.count++;
+    }
+
+    return true;
   }
 
   /** Export all data for a user (privacy compliance). */

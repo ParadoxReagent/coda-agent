@@ -286,5 +286,55 @@ describe("NotesSkill", () => {
       const result = await skill.execute("note_invalid", {});
       expect(result).toContain("Unknown tool");
     });
+
+    describe("SQL injection resistance", () => {
+      it("safely handles SQL injection payloads in search queries", async () => {
+        // These payloads should be safely parameterized by Drizzle ORM
+        const injectionPayloads = [
+          "'; DROP TABLE notes; --",
+          "1' OR '1'='1",
+          "' UNION SELECT * FROM users --",
+          "admin'--",
+          "' OR 1=1--",
+        ];
+
+        for (const payload of injectionPayloads) {
+          setupSelectChain([]);
+
+          // Should not throw and should handle safely
+          const result = await skill.execute("note_search", {
+            query: payload,
+          });
+
+          const parsed = JSON.parse(result);
+          expect(parsed.results).toEqual([]);
+          expect(mockWhere).toHaveBeenCalled();
+        }
+      });
+
+      it("safely handles SQL injection in tag filters", async () => {
+        setupSelectChain([]);
+
+        const result = await skill.execute("note_list", {
+          tag: "'; DROP TABLE notes; --",
+        });
+
+        const parsed = JSON.parse(result);
+        expect(parsed.results).toEqual([]);
+        expect(mockWhere).toHaveBeenCalled();
+      });
+
+      it("safely handles SQL injection in note IDs", async () => {
+        setupDeleteChain([]);
+
+        const result = await skill.execute("note_delete", {
+          id: "' OR '1'='1",
+        });
+
+        const parsed = JSON.parse(result);
+        expect(parsed.success).toBe(false);
+        expect(mockWhere).toHaveBeenCalled();
+      });
+    });
   });
 });

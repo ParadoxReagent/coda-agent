@@ -106,6 +106,8 @@ discord:
   allowed_user_ids: []
 
 redis:
+  # For production, use authenticated Redis: redis://:password@host:port
+  # or redis://user:password@host:port
   url: "redis://localhost:6379"
 
 database:
@@ -145,6 +147,11 @@ skills:
   # agent_skill_dirs:
   #   - "./agent-skills"
   #   - "~/.agent-skills"
+
+  # Allow agent skills to load executable resources (.sh, .py, .js, .ts)
+  # Set to false to restrict to data files only (.md, .txt, .json, .yaml, .csv, etc.)
+  # Default: true (for backward compatibility with existing agent skills)
+  # allow_executable_resources: true
 
 # Alerts configuration
 # alerts:
