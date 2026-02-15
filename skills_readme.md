@@ -180,6 +180,50 @@ Use this skill when the user asks about PDF files...
 - `name` — lowercase, alphanumeric + hyphens, max 64 chars (pattern: `/^[a-z][a-z0-9-]*$/`)
 - `description` — max 1024 chars, shown to the LLM in the system prompt
 
+**Optional frontmatter fields:**
+- `docker_image` — Docker image to use for code execution (e.g., `python:3.12-slim`)
+- `dependencies` — Python and system packages required by this skill (see below)
+
+**Dependencies:**
+
+Skills that need Python packages or system libraries can declare them in two formats:
+
+```yaml
+# Flat array (treated as pip dependencies)
+dependencies:
+  - pypdf
+  - pandas
+
+# Structured format (recommended)
+dependencies:
+  pip:
+    - pypdf
+    - pandas
+  system:
+    - poppler-utils
+    - tesseract-ocr
+```
+
+To build pre-built Docker images with dependencies baked in:
+
+```bash
+# Build images for all skills with dependencies
+npm run build:skill-images
+
+# Build a specific skill
+npm run build:skill-images -- pdf
+
+# Rebuild even if image exists
+npm run build:skill-images -- --force
+
+# Show what would be built without building
+npm run build:skill-images -- --dry-run
+```
+
+Pre-built images are named `coda-skill-<name>:latest` and are automatically used when activating a skill if they exist. This allows skills to run in sandboxed containers with `network_enabled: false` since dependencies are already installed.
+
+📖 **For detailed documentation on pre-built skill images, see [docs/skill-docker-images.md](docs/skill-docker-images.md)**
+
 **Supplementary resources** (optional):
 - `scripts/` — Shell scripts, Python scripts, etc.
 - `references/` — API docs, specs, guides

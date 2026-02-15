@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readdir, stat } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readdir, stat, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
+import { tmpdir } from "node:os";
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { Logger } from "../../utils/logger.js";
@@ -37,6 +39,7 @@ export class DockerExecutorSkill implements Skill {
         "node:*",
         "ubuntu:*",
         "alpine:*",
+        "coda-skill-*",
       ],
     };
     this.logger = logger;
@@ -104,7 +107,15 @@ export class DockerExecutorSkill implements Skill {
       this.config.timeout
     );
     const network = params.network ?? this.config.network_enabled;
-    const workingDir = params.working_dir;
+
+    // Create temporary directory if no working_dir provided
+    let workingDir = params.working_dir;
+    let tempDir: string | undefined;
+    if (!workingDir) {
+      tempDir = await mkdtemp(join(tmpdir(), "coda-docker-"));
+      workingDir = tempDir;
+      this.logger.debug({ tempDir }, "Created temporary working directory");
+    }
 
     // Validate image against allowlist
     if (!this.isImageAllowed(image)) {
@@ -136,6 +147,19 @@ export class DockerExecutorSkill implements Skill {
         stderr: err instanceof Error ? err.message : String(err),
       };
       return JSON.stringify(errorOutput, null, 2);
+    } finally {
+      // Clean up temporary directory if we created one
+      if (tempDir) {
+        try {
+          await rm(tempDir, { recursive: true, force: true });
+          this.logger.debug({ tempDir }, "Cleaned up temporary directory");
+        } catch (cleanupErr) {
+          this.logger.warn(
+            { error: cleanupErr, tempDir },
+            "Failed to clean up temporary directory"
+          );
+        }
+      }
     }
   }
 
@@ -155,6 +179,49 @@ export class DockerExecutorSkill implements Skill {
   }
 
   /**
+   * Execute a docker command with proper DOCKER_HOST configuration
+   */
+  private async execDocker(
+    args: string[],
+    options?: { signal?: AbortSignal; maxBuffer?: number }
+  ): Promise<{ stdout: string; stderr: string }> {
+    const env = { ...process.env };
+    if (this.config.docker_socket !== "/var/run/docker.sock") {
+      env.DOCKER_HOST = `unix://${this.config.docker_socket}`;
+    }
+
+    return await execFileAsync("docker", args, {
+      ...options,
+      env,
+    });
+  }
+
+  /**
+   * Create a temporary Docker volume
+   */
+  private async createVolume(): Promise<string> {
+    const volumeName = `coda-exec-${randomBytes(8).toString("hex")}`;
+    await this.execDocker(["volume", "create", volumeName]);
+    this.logger.debug({ volumeName }, "Created Docker volume");
+    return volumeName;
+  }
+
+  /**
+   * Remove a Docker volume
+   */
+  private async removeVolume(volumeName: string): Promise<void> {
+    try {
+      await this.execDocker(["volume", "rm", volumeName]);
+      this.logger.debug({ volumeName }, "Removed Docker volume");
+    } catch (err) {
+      this.logger.warn(
+        { error: err, volumeName },
+        "Failed to remove Docker volume"
+      );
+    }
+  }
+
+  /**
    * Run a command in a Docker container with security constraints
    */
   private async runContainer(
@@ -164,62 +231,184 @@ export class DockerExecutorSkill implements Skill {
     timeout: number,
     network: boolean
   ): Promise<CodeExecuteOutput> {
-    const args = [
-      "run",
-      "--rm", // Ephemeral - auto-remove after exit
-      "--memory",
-      this.config.max_memory, // Memory limit
-      "--cpus",
-      "1", // CPU limit
-      "--pids-limit",
-      "256", // Process limit
-      "--read-only", // Read-only root filesystem
-      "--tmpfs",
-      "/tmp:rw,noexec,nosuid,size=100m", // Limited writable /tmp
-    ];
-
-    // Network configuration
-    if (network) {
-      this.logger.warn("Network access enabled for container");
-    } else {
-      args.push("--network", "none");
-    }
-
-    // Mount working directory if provided
-    if (workingDir) {
-      args.push("-v", `${workingDir}:/workspace:rw`);
-      args.push("-w", "/workspace");
-    }
-
-    // Image and command
-    args.push(image, "sh", "-c", command);
-
-    this.logger.debug({ args }, "Docker run command");
-
-    // Execute with timeout
-    const timeoutMs = timeout * 1000;
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+    // Create a temporary Docker volume (works in any environment)
+    const volumeName = await this.createVolume();
+    let containerId: string | undefined;
 
     try {
-      const { stdout, stderr } = await execFileAsync("docker", args, {
-        signal: controller.signal,
-        maxBuffer: 10 * 1024 * 1024, // 10 MB max output
-      });
+      // Build docker create args with security constraints
+      const createArgs = [
+        "create",
+        "--memory",
+        this.config.max_memory, // Memory limit
+        "--cpus",
+        "1", // CPU limit
+        "--pids-limit",
+        "256", // Process limit
+        "--read-only", // Read-only root filesystem
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=100m", // Limited writable /tmp
+      ];
+
+      // Network configuration
+      if (network) {
+        this.logger.warn("Network access enabled for container");
+      } else {
+        createArgs.push("--network", "none");
+      }
+
+      // Mount the Docker volume at /workspace
+      createArgs.push("-v", `${volumeName}:/workspace:rw`);
+      createArgs.push("-w", "/workspace");
+
+      // Wrap command to ensure output directory exists
+      const wrappedCommand = `mkdir -p /workspace/output && ${command}`;
+
+      // Image and command
+      createArgs.push(image, "sh", "-c", wrappedCommand);
+
+      this.logger.debug({ createArgs }, "Docker create command");
+
+      // Create the container
+      const { stdout: createStdout } = await this.execDocker(createArgs);
+      containerId = createStdout.trim();
+
+      this.logger.debug({ containerId, volumeName }, "Created container");
+
+      // Copy input files into the container if working_dir provided
+      if (workingDir) {
+        try {
+          // Copy all files from working_dir into /workspace in the container
+          // The trailing /. syntax copies the contents of workingDir
+          await this.execDocker([
+            "cp",
+            `${workingDir}/.`,
+            `${containerId}:/workspace`,
+          ]);
+          this.logger.debug(
+            { workingDir, containerId },
+            "Copied input files to container"
+          );
+        } catch (err) {
+          // If workingDir is empty or doesn't exist, warn but continue
+          this.logger.warn(
+            { error: err, workingDir },
+            "Failed to copy input files (directory may be empty)"
+          );
+        }
+      }
+
+      // Start the container with timeout
+      const timeoutMs = timeout * 1000;
+      const controller = new AbortController();
+      const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+      let stdout = "";
+      let stderr = "";
+      let exitCode = 0;
+      let timedOut = false;
+
+      try {
+        const startResult = await this.execDocker(
+          ["start", "-a", containerId],
+          {
+            signal: controller.signal,
+            maxBuffer: 10 * 1024 * 1024, // 10 MB max output
+          }
+        );
+        stdout = startResult.stdout;
+        stderr = startResult.stderr;
+      } catch (err: unknown) {
+        clearTimeout(timeoutHandle);
+
+        // Check if aborted due to timeout
+        if (
+          err &&
+          typeof err === "object" &&
+          "signal" in err &&
+          err.signal === "SIGTERM"
+        ) {
+          timedOut = true;
+          // Kill the container explicitly since aborting docker start only detaches
+          try {
+            await this.execDocker(["kill", containerId]);
+          } catch (killErr) {
+            this.logger.warn(
+              { error: killErr, containerId },
+              "Failed to kill timed-out container"
+            );
+          }
+        } else if (
+          err &&
+          typeof err === "object" &&
+          "code" in err &&
+          (err as { code: unknown }).code === "ENOENT"
+        ) {
+          // Docker binary not found
+          throw new Error(
+            "Docker is not installed or not found in PATH. Please install Docker and ensure it is accessible."
+          );
+        } else if (
+          err &&
+          typeof err === "object" &&
+          "stdout" in err &&
+          "stderr" in err &&
+          "code" in err
+        ) {
+          // Non-zero exit code
+          const execErr = err as {
+            stdout: string;
+            stderr: string;
+            code: number;
+          };
+          stdout = execErr.stdout?.toString() ?? "";
+          stderr = execErr.stderr?.toString() ?? "";
+          exitCode = execErr.code;
+        } else {
+          throw err;
+        }
+      }
 
       clearTimeout(timeoutHandle);
 
-      // Collect output files from /workspace/output/ if working_dir was provided
+      if (timedOut) {
+        throw new Error(`Execution timed out after ${timeout} seconds`);
+      }
+
+      // Copy output files from container to working directory
       let outputFiles: CodeExecuteOutput["output_files"];
       if (workingDir) {
-        outputFiles = await this.collectOutputFiles(workingDir);
+        try {
+          // Copy /workspace/output/ from container to workingDir/output/
+          const outputDir = join(workingDir, "output");
+          await mkdir(outputDir, { recursive: true });
+
+          await this.execDocker([
+            "cp",
+            `${containerId}:/workspace/output/.`,
+            outputDir,
+          ]);
+
+          this.logger.debug(
+            { containerId, outputDir },
+            "Copied output files from container"
+          );
+
+          outputFiles = await this.collectOutputFiles(workingDir);
+        } catch (err) {
+          // If output directory doesn't exist in container, that's okay
+          this.logger.debug(
+            { error: err },
+            "No output files to copy (output/ directory not found in container)"
+          );
+        }
       }
 
       const result: CodeExecuteOutput = {
-        success: true,
+        success: exitCode === 0,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
-        exit_code: 0,
+        exit_code: exitCode,
       };
 
       if (outputFiles && outputFiles.length > 0) {
@@ -227,51 +416,21 @@ export class DockerExecutorSkill implements Skill {
       }
 
       return result;
-    } catch (err: unknown) {
-      clearTimeout(timeoutHandle);
-
-      if (
-        err &&
-        typeof err === "object" &&
-        "signal" in err &&
-        err.signal === "SIGTERM"
-      ) {
-        throw new Error(`Execution timed out after ${timeout} seconds`);
-      }
-
-      // Check if this is an ExecFileException
-      if (
-        err &&
-        typeof err === "object" &&
-        "stdout" in err &&
-        "stderr" in err &&
-        "code" in err
-      ) {
-        const execErr = err as {
-          stdout: string;
-          stderr: string;
-          code: number;
-        };
-        // Non-zero exit code
-        const result: CodeExecuteOutput = {
-          success: false,
-          stdout: execErr.stdout?.toString() ?? "",
-          stderr: execErr.stderr?.toString() ?? "",
-          exit_code: execErr.code,
-        };
-
-        // Still try to collect output files even if command failed
-        if (workingDir) {
-          const outputFiles = await this.collectOutputFiles(workingDir);
-          if (outputFiles && outputFiles.length > 0) {
-            result.output_files = outputFiles;
-          }
+    } finally {
+      // Clean up container and volume
+      if (containerId) {
+        try {
+          await this.execDocker(["rm", "-f", containerId]);
+          this.logger.debug({ containerId }, "Removed container");
+        } catch (err) {
+          this.logger.warn(
+            { error: err, containerId },
+            "Failed to remove container"
+          );
         }
-
-        return result;
       }
 
-      throw err;
+      await this.removeVolume(volumeName);
     }
   }
 

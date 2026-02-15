@@ -79,6 +79,12 @@ weather: {}         # Free NWS API, no key needed
 #   timeout: 60
 #   max_memory: "512m"
 #   network_enabled: false
+#   allowed_images:  # Glob patterns for allowed Docker images
+#     - "python:*"
+#     - "node:*"
+#     - "ubuntu:*"
+#     - "alpine:*"
+#     - "coda-skill-*"  # Pre-built skill images (use npm run build:skill-images)
 
 # slack:
 #   app_token: ""  # or SLACK_APP_TOKEN

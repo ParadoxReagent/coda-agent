@@ -10,6 +10,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - coda-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - coda-internal
     depends_on:

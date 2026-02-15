@@ -1,6 +1,7 @@
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { AgentSkillDiscovery } from "../agent-skill-discovery.js";
+import { getSkillImageName, imageExists } from "../docker-executor/skill-image-builder.js";
 
 export class AgentSkillsSkill implements Skill {
   readonly name = "agent-skills";
@@ -111,16 +112,29 @@ export class AgentSkillsSkill implements Skill {
         .getSkillMetadataList()
         .find((s) => s.name === skillName);
 
-      const executionNote = this.hasCodeExecution && metadata?.docker_image
-        ? `IMPORTANT: Use the code_execute tool to run the code from these instructions. Use image="${metadata.docker_image}" and the working_dir from the message context. Write output files to /workspace/output/. Do NOT paste code for the user to run manually.`
-        : undefined;
+      // Check if a pre-built image exists for this skill
+      const prebuiltImageName = getSkillImageName(skillName);
+      const usePrebuiltImage = imageExists(prebuiltImageName);
+
+      // Determine which Docker image to use
+      const dockerImage = usePrebuiltImage ? prebuiltImageName : metadata?.docker_image;
+
+      // Build execution note
+      let executionNote: string | undefined;
+      if (this.hasCodeExecution && dockerImage) {
+        executionNote = `IMPORTANT: Use the code_execute tool to run the code from these instructions. Use image="${dockerImage}" and the working_dir from the message context. Write output files to /workspace/output/. Do NOT paste code for the user to run manually.`;
+
+        if (usePrebuiltImage) {
+          executionNote += ` Dependencies are pre-installed in this image — do NOT run pip install or apt-get.`;
+        }
+      }
 
       return JSON.stringify({
         success: true,
         skill: skillName,
         instructions,
         resources: resources.length > 0 ? resources : undefined,
-        docker_image: metadata?.docker_image,
+        docker_image: dockerImage,
         dependencies: metadata?.dependencies,
         execution_note: executionNote,
         message:

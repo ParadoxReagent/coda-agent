@@ -209,6 +209,7 @@ const ExecutionConfigSchema = z.object({
     "node:*",
     "ubuntu:*",
     "alpine:*",
+    "coda-skill-*",
   ]),
 });
 

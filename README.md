@@ -521,6 +521,7 @@ pnpm run lint
 
 - [Integrations](integrations_readme.md) — n8n, Firecrawl
 - [Skills](skills_readme.md) — Reminders, Notes, Memory, Scheduler, Agent Skills
+- [Skill Docker Images](docs/skill-docker-images.md) — Pre-built images for skills with dependencies
 - [Architecture Overview](personal-assistant-architecture.md)
 - [Phase 1 Plan](phase-1-foundation.md)
 - [Phase 2 Plan](phase-2-mvp-skills.md)

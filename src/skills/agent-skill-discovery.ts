@@ -28,6 +28,14 @@ const ALLOWED_RESOURCE_EXTENSIONS = new Set([
   ...EXECUTABLE_EXTENSIONS,
 ]);
 
+/** Structured dependencies for a skill. */
+export interface SkillDependencies {
+  /** Python pip packages */
+  pip?: string[];
+  /** System packages (apt/apk) */
+  system?: string[];
+}
+
 export interface AgentSkillMetadata {
   name: string;
   description: string;
@@ -35,8 +43,8 @@ export interface AgentSkillMetadata {
   dirPath: string;
   /** Docker image to use for code execution (optional) */
   docker_image?: string;
-  /** Dependencies required for this skill (optional) */
-  dependencies?: string[];
+  /** Dependencies required for this skill (optional) - can be flat array (treated as pip) or structured object */
+  dependencies?: string[] | SkillDependencies;
 }
 
 interface ParsedFrontmatter {
@@ -313,11 +321,36 @@ export class AgentSkillDiscovery {
         ? frontmatter.docker_image
         : undefined;
 
-    const dependencies = Array.isArray(frontmatter.dependencies)
-      ? frontmatter.dependencies.filter(
-          (d): d is string => typeof d === "string"
-        )
-      : undefined;
+    // Parse dependencies - support both flat array (treated as pip) and structured object
+    let dependencies: string[] | SkillDependencies | undefined;
+    if (Array.isArray(frontmatter.dependencies)) {
+      // Flat array - backward compatible, treated as pip dependencies
+      dependencies = frontmatter.dependencies.filter(
+        (d): d is string => typeof d === "string"
+      );
+      if (dependencies.length === 0) dependencies = undefined;
+    } else if (
+      frontmatter.dependencies &&
+      typeof frontmatter.dependencies === "object"
+    ) {
+      // Structured object with pip/system fields
+      const deps = frontmatter.dependencies as Record<string, unknown>;
+      const structured: SkillDependencies = {};
+
+      if (Array.isArray(deps.pip)) {
+        const pipDeps = deps.pip.filter((d): d is string => typeof d === "string");
+        if (pipDeps.length > 0) structured.pip = pipDeps;
+      }
+
+      if (Array.isArray(deps.system)) {
+        const sysDeps = deps.system.filter((d): d is string => typeof d === "string");
+        if (sysDeps.length > 0) structured.system = sysDeps;
+      }
+
+      if (structured.pip || structured.system) {
+        dependencies = structured;
+      }
+    }
 
     const metadata: AgentSkillMetadata = {
       name,
@@ -329,7 +362,7 @@ export class AgentSkillDiscovery {
       metadata.docker_image = dockerImage;
     }
 
-    if (dependencies && dependencies.length > 0) {
+    if (dependencies) {
       metadata.dependencies = dependencies;
     }
 

@@ -16,6 +16,9 @@ FROM node:22-alpine
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
+# Install Docker CLI and su-exec for socket permission handling
+RUN apk add --no-cache docker-cli su-exec
+
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
@@ -28,6 +31,9 @@ COPY src/skills/agent-skills/ ./dist/skills/agent-skills/
 ENV NODE_ENV=production
 EXPOSE 3000
 
-USER node
+# Add entrypoint script to handle Docker socket permissions
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "dist/main.js"]
