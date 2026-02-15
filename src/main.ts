@@ -53,7 +53,7 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
     memory: config.memory,
     firecrawl: config.firecrawl,
     weather: config.weather,
-    n8n: {},
+    n8n: config.n8n,
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
 }
@@ -179,7 +179,7 @@ async function main() {
   skillRegistry.register(new NotesSkill());
   skillRegistry.register(new ReminderSkill());
   skillRegistry.register(new SchedulerSkill(taskScheduler));
-  skillRegistry.register(new N8nSkill());
+  skillRegistry.register(new N8nSkill(), config.n8n);
 
   // Memory registers conditionally (requires API key)
   if (config.memory) {

@@ -5,7 +5,7 @@ import type { Logger } from "../../utils/logger.js";
 import type { Database } from "../../db/index.js";
 import { ContentSanitizer } from "../../core/sanitizer.js";
 import { N8nQueries } from "./queries.js";
-import type { N8nEventFilters } from "./types.js";
+import type { N8nEventFilters, N8nWebhookConfig } from "./types.js";
 
 export class N8nSkill implements Skill {
   readonly name = "n8n";
@@ -17,6 +17,7 @@ export class N8nSkill implements Skill {
   private db!: Database;
   private eventBus!: EventBus;
   private queries!: N8nQueries;
+  private webhooks: Record<string, N8nWebhookConfig> = {};
 
   getTools(): SkillToolDefinition[] {
     return [
@@ -130,6 +131,30 @@ export class N8nSkill implements Skill {
           required: ["event_ids"],
         },
       },
+      {
+        name: "n8n_trigger_webhook",
+        description: "Trigger a registered n8n webhook and return the response. Use to invoke n8n workflows that return data.",
+        requiresConfirmation: true,
+        input_schema: {
+          type: "object",
+          properties: {
+            webhook_name: {
+              type: "string",
+              description: "Name of the registered webhook to call (from config)",
+            },
+            payload: {
+              type: "object",
+              description: "Optional JSON payload to send with the request",
+            },
+          },
+          required: ["webhook_name"],
+        },
+      },
+      {
+        name: "n8n_list_webhooks",
+        description: "List all registered n8n webhooks that can be triggered.",
+        input_schema: { type: "object", properties: {} },
+      },
     ];
   }
 
@@ -147,6 +172,10 @@ export class N8nSkill implements Skill {
           return await this.listEventTypes(toolInput);
         case "n8n_mark_processed":
           return await this.markProcessed(toolInput);
+        case "n8n_trigger_webhook":
+          return await this.triggerWebhook(toolInput);
+        case "n8n_list_webhooks":
+          return this.listWebhooks();
         default:
           return JSON.stringify({
             success: false,
@@ -171,6 +200,17 @@ export class N8nSkill implements Skill {
     this.eventBus = ctx.eventBus;
     this.logger = ctx.logger;
     this.queries = new N8nQueries(this.db);
+
+    // Load webhook config
+    const cfg = ctx.config ?? {};
+    const webhookEntries = (cfg.webhooks as Record<string, unknown>) ?? {};
+    for (const [name, entry] of Object.entries(webhookEntries)) {
+      this.webhooks[name] = entry as N8nWebhookConfig;
+    }
+
+    if (Object.keys(this.webhooks).length > 0) {
+      this.logger.info({ webhooks: Object.keys(this.webhooks) }, "Loaded n8n webhooks");
+    }
 
     // Subscribe to n8n events from webhook service
     ctx.eventBus.subscribe("n8n.*", async (event) => {
@@ -394,5 +434,86 @@ export class N8nSkill implements Skill {
     if (data?.summary) return ContentSanitizer.sanitizeEmailMetadata(data.summary as string);
 
     return `${payload.type} event from ${ContentSanitizer.sanitizeHostname((payload.source_workflow as string) || "n8n")}`;
+  }
+
+  private async triggerWebhook(input: Record<string, unknown>): Promise<string> {
+    const name = input.webhook_name as string;
+    const payload = input.payload as Record<string, unknown> | undefined;
+
+    const webhook = this.webhooks[name];
+    if (!webhook) {
+      const available = Object.keys(this.webhooks);
+      return JSON.stringify({
+        success: false,
+        message: `Unknown webhook "${name}". Available: ${available.length ? available.join(", ") : "none configured"}`,
+      });
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), webhook.timeout_ms);
+
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (webhook.auth) {
+        if (webhook.auth.type === "header") {
+          headers[webhook.auth.name] = webhook.auth.value;
+        } else if (webhook.auth.type === "basic") {
+          const encoded = Buffer.from(`${webhook.auth.username}:${webhook.auth.password}`).toString("base64");
+          headers["Authorization"] = `Basic ${encoded}`;
+        }
+      }
+
+      const res = await fetch(webhook.url, {
+        method: "POST",
+        headers,
+        body: payload ? JSON.stringify(payload) : undefined,
+        signal: controller.signal,
+      });
+
+      const text = await res.text();
+      let responseData: unknown;
+      try {
+        responseData = JSON.parse(text);
+      } catch {
+        responseData = text;
+      }
+
+      if (!res.ok) {
+        return JSON.stringify({
+          success: false,
+          status: res.status,
+          error: typeof responseData === "string" ? responseData : text,
+        });
+      }
+
+      // Sanitize response before returning to LLM
+      const sanitized = typeof responseData === "object" && responseData !== null
+        ? this.sanitizeEventData(responseData as Record<string, unknown>)
+        : ContentSanitizer.sanitizeApiResponse(String(responseData));
+
+      return JSON.stringify({
+        success: true,
+        webhook: name,
+        status: res.status,
+        data: sanitized,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return JSON.stringify({
+        success: false,
+        webhook: name,
+        error: message.includes("abort") ? "Request timed out" : message,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private listWebhooks(): string {
+    const entries = Object.entries(this.webhooks).map(([name, w]) => ({
+      name,
+      description: w.description ?? "(no description)",
+    }));
+    return JSON.stringify({ webhooks: entries, count: entries.length });
   }
 }

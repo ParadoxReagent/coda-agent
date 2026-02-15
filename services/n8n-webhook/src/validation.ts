@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { timingSafeEqual } from "node:crypto";
 
 export const Priority = z.enum(["high", "normal", "low"]);
 
@@ -29,10 +30,11 @@ export const N8nWebhookPayload = z.object({
 
 export type N8nWebhookPayloadType = z.infer<typeof N8nWebhookPayload>;
 
+const WEBHOOK_HEADER_NAME = (process.env.N8N_WEBHOOK_HEADER_NAME || "x-webhook-secret").toLowerCase();
 const WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || "";
 
 export function validateWebhookSecret(
-  provided: string | string[] | undefined
+  headers: Record<string, string | string[] | undefined>
 ): boolean {
   if (!WEBHOOK_SECRET) {
     console.warn(
@@ -40,6 +42,15 @@ export function validateWebhookSecret(
     );
     return true;
   }
-  const value = Array.isArray(provided) ? provided[0] : provided;
-  return value === WEBHOOK_SECRET;
+  const raw = headers[WEBHOOK_HEADER_NAME];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return false;
+
+  try {
+    const a = Buffer.from(value);
+    const b = Buffer.from(WEBHOOK_SECRET);
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }

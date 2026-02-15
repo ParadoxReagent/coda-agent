@@ -59,8 +59,7 @@ fastify.post<{ Body: N8nWebhookPayloadType }>(
     },
   },
   async (request, reply) => {
-    const authHeader = request.headers["x-webhook-secret"];
-    if (!validateWebhookSecret(authHeader)) {
+    if (!validateWebhookSecret(request.headers)) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
 

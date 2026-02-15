@@ -31,3 +31,14 @@ export interface N8nEventSummary {
   by_workflow: Record<string, number>;
   recent_types: string[];
 }
+
+export type N8nWebhookAuth =
+  | { type: "header"; name: string; value: string }
+  | { type: "basic"; username: string; password: string };
+
+export interface N8nWebhookConfig {
+  url: string;
+  auth?: N8nWebhookAuth;
+  timeout_ms: number;
+  description?: string;
+}

@@ -146,6 +146,31 @@ const WeatherConfigSchema = z.object({
   cache_ttl_seconds: z.number().default(900),
 });
 
+const N8nWebhookAuthSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("header"),
+    name: z.string(),
+    value: z.string(),
+  }),
+  z.object({
+    type: z.literal("basic"),
+    username: z.string(),
+    password: z.string(),
+  }),
+]);
+
+const N8nWebhookEntrySchema = z.object({
+  url: z.string().url(),
+  auth: N8nWebhookAuthSchema.optional(),
+  timeout_ms: z.number().default(30000),
+  description: z.string().optional(),
+});
+
+const N8nConfigSchema = z.object({
+  webhooks: z.record(N8nWebhookEntrySchema).default({}),
+  default_timeout_ms: z.number().default(30000),
+});
+
 const SchedulerConfigSchema = z.object({
   tasks: z.record(z.object({
     cron: z.string(),
@@ -243,6 +268,7 @@ const AppConfigSchema = z.object({
   subagents: SubagentConfigSchema.optional(),
   firecrawl: FirecrawlConfigSchema.optional(),
   weather: WeatherConfigSchema.optional().default({}),
+  n8n: N8nConfigSchema.optional(),
   doctor: DoctorConfigSchema.optional().default({ enabled: true }),
   security: SecurityConfigSchema.optional(),
   execution: ExecutionConfigSchema.optional(),
@@ -252,6 +278,7 @@ export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
 export type FirecrawlConfig = z.infer<typeof FirecrawlConfigSchema>;
 export type WeatherConfig = z.infer<typeof WeatherConfigSchema>;
+export type N8nConfig = z.infer<typeof N8nConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderCapabilitiesConfig = z.infer<typeof ProviderCapabilitiesSchema>;
 export type TierConfig = z.infer<typeof TierConfigSchema>;

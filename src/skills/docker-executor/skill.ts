@@ -278,22 +278,34 @@ export class DockerExecutorSkill implements Skill {
       // Copy input files into the container if working_dir provided
       if (workingDir) {
         try {
-          // Copy all files from working_dir into /workspace in the container
-          // The trailing /. syntax copies the contents of workingDir
-          await this.execDocker([
-            "cp",
-            `${workingDir}/.`,
-            `${containerId}:/workspace`,
-          ]);
-          this.logger.debug(
-            { workingDir, containerId },
-            "Copied input files to container"
-          );
+          // Check if directory has any input files to copy (excluding output/ subdirectory)
+          const entries = await readdir(workingDir);
+          const inputFiles = entries.filter(name => name !== 'output');
+          const hasInputFiles = inputFiles.length > 0;
+
+          if (hasInputFiles) {
+            // Copy all files from working_dir into /workspace in the container
+            // The trailing /. syntax copies the contents of workingDir
+            await this.execDocker([
+              "cp",
+              `${workingDir}/.`,
+              `${containerId}:/workspace`,
+            ]);
+            this.logger.debug(
+              { workingDir, containerId, fileCount: inputFiles.length },
+              "Copied input files to container"
+            );
+          } else {
+            this.logger.debug(
+              { workingDir },
+              "No input files to copy (working directory empty except for output/)"
+            );
+          }
         } catch (err) {
-          // If workingDir is empty or doesn't exist, warn but continue
+          // If workingDir doesn't exist or copy fails, warn but continue
           this.logger.warn(
             { error: err, workingDir },
-            "Failed to copy input files (directory may be empty)"
+            "Failed to copy input files"
           );
         }
       }
