@@ -35,6 +35,7 @@ import { DoctorService } from "./core/doctor/doctor-service.js";
 import { DoctorSkill } from "./skills/doctor/skill.js";
 import { SubagentManager } from "./core/subagent-manager.js";
 import { TierClassifier } from "./core/tier-classifier.js";
+import { DockerExecutorSkill } from "./skills/docker-executor/skill.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
@@ -249,7 +250,19 @@ async function main() {
   agentSkillDiscovery.scanDirectories(agentSkillDirs);
 
   if (agentSkillDiscovery.getSkillMetadataList().length > 0) {
-    skillRegistry.register(new AgentSkillsSkill(agentSkillDiscovery));
+    skillRegistry.register(new AgentSkillsSkill(agentSkillDiscovery, config.execution?.enabled ?? false));
+  }
+
+  // 7c. Docker Executor Skill (code execution in sandboxed containers)
+  if (config.execution?.enabled) {
+    try {
+      skillRegistry.register(new DockerExecutorSkill(config.execution, logger));
+      logger.info("Docker executor skill registered");
+    } catch (err) {
+      logger.warn({ error: err }, "Docker executor skill not registered");
+    }
+  } else {
+    logger.info("Docker executor disabled (execution.enabled: false)");
   }
 
   // 8. Create orchestrator with optional tier classifier
@@ -270,13 +283,12 @@ async function main() {
   );
 
   // 8a. Initialize DoctorService
-  const doctorConfig = config.doctor;
   const doctorService = new DoctorService(logger, {
-    enabled: doctorConfig?.enabled ?? true,
-    patternWindowMs: (doctorConfig?.pattern_window_seconds ?? 300) * 1000,
-    patternThreshold: doctorConfig?.pattern_threshold ?? 5,
-    skillRecoveryIntervalMs: (doctorConfig?.skill_recovery_interval_seconds ?? 60) * 1000,
-    maxErrorHistory: doctorConfig?.max_error_history ?? 500,
+    enabled: config.doctor.enabled,
+    patternWindowMs: config.doctor.pattern_window_seconds * 1000,
+    patternThreshold: config.doctor.pattern_threshold,
+    skillRecoveryIntervalMs: config.doctor.skill_recovery_interval_seconds * 1000,
+    maxErrorHistory: config.doctor.max_error_history,
   }, {
     eventBus,
     skillHealthTracker,

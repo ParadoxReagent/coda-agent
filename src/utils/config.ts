@@ -196,6 +196,22 @@ const SecurityConfigSchema = z.object({
   sensitive_tool_policy: z.enum(["log", "confirm_with_external", "always_confirm"]).default("log"),
 });
 
+const ExecutionConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  docker_socket: z.string().default("/var/run/docker.sock"),
+  default_image: z.string().default("python:3.12-slim"),
+  timeout: z.number().min(1).max(300).default(60),
+  max_memory: z.string().default("512m"),
+  network_enabled: z.boolean().default(false),
+  max_output_size: z.number().default(52428800), // 50 MB
+  allowed_images: z.array(z.string()).default([
+    "python:*",
+    "node:*",
+    "ubuntu:*",
+    "alpine:*",
+  ]),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -225,9 +241,10 @@ const AppConfigSchema = z.object({
   scheduler: SchedulerConfigSchema.optional(),
   subagents: SubagentConfigSchema.optional(),
   firecrawl: FirecrawlConfigSchema.optional(),
-  weather: WeatherConfigSchema.optional(),
-  doctor: DoctorConfigSchema.optional(),
+  weather: WeatherConfigSchema.optional().default({}),
+  doctor: DoctorConfigSchema.optional().default({ enabled: true }),
   security: SecurityConfigSchema.optional(),
+  execution: ExecutionConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -237,6 +254,7 @@ export type WeatherConfig = z.infer<typeof WeatherConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderCapabilitiesConfig = z.infer<typeof ProviderCapabilitiesSchema>;
 export type TierConfig = z.infer<typeof TierConfigSchema>;
+export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 
 /**
  * Load configuration from YAML file with environment variable overrides.
@@ -357,6 +375,16 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     const tiers = ensureObject(llm, "tiers");
     const heavy = ensureObject(tiers, "heavy");
     heavy.model = process.env.TIER_HEAVY_MODEL;
+  }
+
+  // Execution overrides
+  if (process.env.EXECUTION_ENABLED !== undefined) {
+    const execution = ensureObject(config, "execution");
+    execution.enabled = process.env.EXECUTION_ENABLED === "true";
+  }
+  if (process.env.EXECUTION_DEFAULT_IMAGE) {
+    const execution = ensureObject(config, "execution");
+    execution.default_image = process.env.EXECUTION_DEFAULT_IMAGE;
   }
 
   // Set defaults for llm config

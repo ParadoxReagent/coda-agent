@@ -33,11 +33,17 @@ export interface AgentSkillMetadata {
   description: string;
   /** Absolute path to the skill directory. */
   dirPath: string;
+  /** Docker image to use for code execution (optional) */
+  docker_image?: string;
+  /** Dependencies required for this skill (optional) */
+  dependencies?: string[];
 }
 
 interface ParsedFrontmatter {
   name?: unknown;
   description?: unknown;
+  docker_image?: unknown;
+  dependencies?: unknown;
 }
 
 export class AgentSkillDiscovery {
@@ -301,8 +307,37 @@ export class AgentSkillDiscovery {
       return;
     }
 
-    this.skills.set(name, { name, description, dirPath });
-    this.logger.info({ name, dir: dirPath }, "Discovered agent skill");
+    // Extract optional fields
+    const dockerImage =
+      typeof frontmatter.docker_image === "string"
+        ? frontmatter.docker_image
+        : undefined;
+
+    const dependencies = Array.isArray(frontmatter.dependencies)
+      ? frontmatter.dependencies.filter(
+          (d): d is string => typeof d === "string"
+        )
+      : undefined;
+
+    const metadata: AgentSkillMetadata = {
+      name,
+      description,
+      dirPath,
+    };
+
+    if (dockerImage) {
+      metadata.docker_image = dockerImage;
+    }
+
+    if (dependencies && dependencies.length > 0) {
+      metadata.dependencies = dependencies;
+    }
+
+    this.skills.set(name, metadata);
+    this.logger.info(
+      { name, dir: dirPath, docker_image: dockerImage },
+      "Discovered agent skill"
+    );
   }
 
   private parseFrontmatter(raw: string): ParsedFrontmatter | null {

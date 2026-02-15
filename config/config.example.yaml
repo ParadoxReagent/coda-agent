@@ -1,300 +1,106 @@
+# ── Required ──────────────────────────────────────
 llm:
   default_provider: "anthropic"
   default_model: "claude-sonnet-4-5-20250514"
-
   providers:
     anthropic:
       type: "anthropic"
-      api_key: "sk-ant-..."
+      api_key: ""  # or set ANTHROPIC_API_KEY env var
       models:
         - "claude-sonnet-4-5-20250514"
         - "claude-haiku-3-5-20241022"
 
-    google:
-      type: "google"
-      api_key: "AIza..."
-      models:
-        - "gemini-2.0-flash"
-        - "gemini-2.0-pro"
-      capabilities:
-        parallel_tool_calls: false
-
-    openai:
-      type: "openai_compat"
-      base_url: "https://api.openai.com/v1"
-      api_key: "sk-..."
-      models:
-        - "gpt-4o"
-        - "gpt-4o-mini"
-
-    openrouter:
-      type: "openai_compat"
-      base_url: "https://openrouter.ai/api/v1"
-      api_key: "sk-or-..."
-      default_headers:
-        HTTP-Referer: "https://coda-agent.local"
-        X-Title: "coda"
-      models:
-        - "anthropic/claude-sonnet-4-5"
-        - "google/gemini-2.0-flash"
-
-    ollama:
-      type: "openai_compat"
-      base_url: "http://localhost:11434/v1"
-      api_key: "ollama"
-      models:
-        - "llama3.1:8b"
-        - "mistral:7b"
-      capabilities:
-        tools: "model_dependent"
-        usage_metrics: false
-        json_mode: false
-
-  cost_per_million_tokens:
-    "claude-sonnet-4-5-20250514":
-      input: 3.0
-      output: 15.0
-    "gpt-4o":
-      input: 2.5
-      output: 10.0
-    "gemini-2.0-flash":
-      input: 0.1
-      output: 0.4
-
-  daily_spend_alert_threshold: 10.0
-
-  # Dual LLM Tier Routing — cost optimization via light/heavy model routing
-  # When enabled, simple requests use a fast/cheap "light" model (e.g., Haiku).
-  # Complex requests or heavy tool calls automatically escalate to "heavy" model (e.g., Sonnet).
-  # This can significantly reduce costs while maintaining quality where it matters.
-  #
-  # tiers:
-  #   enabled: true
-  #   light:
-  #     provider: "anthropic"
-  #     model: "claude-haiku-3-5-20241022"
-  #   heavy:
-  #     provider: "anthropic"
-  #     model: "claude-sonnet-4-5-20250514"
-  #   heavy_tools:              # Tools that trigger escalation from light to heavy
-  #     - "delegate_to_subagent"
-  #     - "sessions_spawn"
-  #     - "firecrawl_crawl"
-  #     - "firecrawl_search"
-  #     - "skill_activate"
-  #   heavy_patterns:           # Message patterns that route directly to heavy
-  #     - "research"
-  #     - "analyze"
-  #     - "compare"
-  #     - "deep dive"
-  #   heavy_message_length: 800 # Character threshold for heavy routing
-  #   show_tier: false          # Show tier indicator in responses
-  #
-  # Environment variable overrides:
-  #   TIER_ENABLED=true|false
-  #   TIER_LIGHT_MODEL=claude-haiku-3-5-20241022
-  #   TIER_HEAVY_MODEL=claude-sonnet-4-5-20250514
-  #
-  # User commands (Discord):
-  #   /model tier light <provider> <model>  — Set light tier model
-  #   /model tier heavy <provider> <model>  — Set heavy tier model
-  #   /model status                         — Show tier configuration and per-tier usage
-
 discord:
-  bot_token: ""
-  channel_id: ""
-  allowed_user_ids: []
+  bot_token: ""       # or DISCORD_BOT_TOKEN
+  channel_id: ""      # or DISCORD_CHANNEL_ID
+  allowed_user_ids: [] # or DISCORD_ALLOWED_USER_IDS (comma-separated)
 
+# ── Defaults (override if needed) ─────────────────
 redis:
-  # For production, use authenticated Redis: redis://:password@host:port
-  # or redis://user:password@host:port
   url: "redis://localhost:6379"
 
 database:
-  url: "postgresql://localhost:5432/coda"  # Change default credentials for production!
-  # conversation_retention_days: 30  # Auto-delete conversations older than this (when DB storage is enabled)
+  url: "postgresql://localhost:5432/coda"
 
 server:
   port: 3000
   host: "127.0.0.1"
-  # api_key: "${API_KEY}"                   # Bearer token for REST API auth
-  # require_auth_for_health: false          # Whether /health requires auth
-
-# Memory — semantic memory with vector embeddings
-# memory:
-#   base_url: "http://memory-service:8010"
-#   api_key: "${MEMORY_API_KEY}"
-#   context_injection:
-#     enabled: true
-#     max_tokens: 1500
 
 skills:
   external_dirs: []
-  external_policy:
-    mode: "strict"
-    # Trusted Ed25519 public keys for verifying external skill signatures
-    # trusted_signing_keys:
-    #   - id: "publisher-id-1"
-    #     publicKey: "base64-encoded-ed25519-public-key" # or PEM format
-    trusted_signing_keys: []
-    allow_unsigned_local: false
-    allowed_local_unsigned_dirs:
-      - "./custom-skills"
-
-  # Agent Skills (agentskills.io standard) — instruction-based skills
-  # Scan directories for subdirectories containing SKILL.md files
   agent_skill_dirs: []
-  # agent_skill_dirs:
-  #   - "./agent-skills"
-  #   - "~/.agent-skills"
 
-  # Allow agent skills to load executable resources (.sh, .py, .js, .ts)
-  # Set to false to restrict to data files only (.md, .txt, .json, .yaml, .csv, etc.)
-  # Default: true (for backward compatibility with existing agent skills)
-  # allow_executable_resources: true
+# ── Enabled by default (zero-config) ─────────────
+weather: {}         # Free NWS API, no key needed
+# doctor runs automatically — see integrations_readme.md for tuning
 
-# Alerts configuration
+# ── Optional Integrations ────────────────────────
+# Each section below is OFF unless configured.
+# See integrations_readme.md and skills_readme.md for full docs.
+#
+# Env var quick reference (auto-scaffolds providers when set):
+#   ANTHROPIC_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
+#   FIRECRAWL_API_KEY        → web scraping/search
+#   MEMORY_API_KEY           → semantic memory
+#   EXECUTION_ENABLED=true   → Docker code execution
+#   SLACK_APP_TOKEN + SLACK_BOT_TOKEN → Slack interface
+#
+# Tier routing (cost optimization):
+#   TIER_ENABLED=true
+#   TIER_LIGHT_MODEL=claude-haiku-3-5-20241022
+#   TIER_HEAVY_MODEL=claude-sonnet-4-5-20250514
+#
+# Uncomment sections below to customize defaults:
+
+# google:
+#   type: "google"
+#   api_key: ""  # or GOOGLE_API_KEY
+#   models:
+#     - "gemini-2.0-flash"
+
+# openai:
+#   type: "openai_compat"
+#   base_url: "https://api.openai.com/v1"
+#   api_key: ""  # or OPENAI_API_KEY
+#   models:
+#     - "gpt-4o"
+
+# firecrawl:
+#   api_key: ""  # or FIRECRAWL_API_KEY (required for cloud)
+#   # api_url: "http://localhost:3002"  # for self-hosted instance
+
+# memory:
+#   api_key: ""  # or MEMORY_API_KEY
+#   base_url: "http://memory-service:8010"
+
+# execution:
+#   enabled: false  # or EXECUTION_ENABLED=true
+#   default_image: "python:3.12-slim"
+#   timeout: 60
+#   max_memory: "512m"
+#   network_enabled: false
+
+# slack:
+#   app_token: ""  # or SLACK_APP_TOKEN
+#   bot_token: ""  # or SLACK_BOT_TOKEN
+#   channel_id: ""
+#   allowed_user_ids: []
+
+# subagents:
+#   enabled: true
+#   default_timeout_minutes: 5
+#   max_concurrent_per_user: 3
+
+# doctor:
+#   enabled: true
+#   pattern_window_seconds: 300
+#   pattern_threshold: 10
+#   output_repair:
+#     enabled: true
+#     quick_fix_only: true  # SECURITY: true = no LLM repair (prevents injection)
+
 # alerts:
-#   rules:
-#     "alert.reminder.due":
-#       severity: "medium"
-#       channels: ["discord"]
-#       quietHours: true
-#       cooldown: 60
-#     "alert.unifi.new_client":
-#       severity: "medium"
-#       channels: ["discord"]
-#       quietHours: true
-#       cooldown: 0
-#     "alert.unifi.bandwidth_spike":
-#       severity: "low"
-#       channels: ["discord"]
-#       quietHours: true
-#       cooldown: 900
-#     "alert.unifi.device_offline":
-#       severity: "high"
-#       channels: ["discord"]
-#       quietHours: true
-#       cooldown: 600
 #   quiet_hours:
 #     enabled: false
 #     start: "22:00"
 #     end: "07:00"
-#     timezone: "America/New_York"
-#     override_severities: ["high"]
-
-# Sub-agent configuration
-# subagents:
-#   enabled: true
-#   default_timeout_minutes: 5
-#   max_timeout_minutes: 10
-#   sync_timeout_seconds: 120
-#   max_concurrent_per_user: 3
-#   max_concurrent_global: 10
-#   archive_ttl_minutes: 60
-#   max_tool_calls_per_run: 25
-#   default_token_budget: 50000
-#   max_token_budget: 200000
-#   spawn_rate_limit:
-#     max_requests: 10
-#     window_seconds: 3600
-#   cleanup_interval_seconds: 60
-#   # Security: safe default tools when sessions_spawn called without allowed_tools
-#   safe_default_tools:
-#     - "firecrawl_scrape"
-#     - "firecrawl_search"
-#     - "firecrawl_map"
-#     - "note_save"
-#     - "note_search"
-#   # Tools that should never be auto-granted (require explicit allowedTools)
-#   restricted_tools: []
-
-# Firecrawl — web scraping, crawling, URL mapping, and search (API v2)
-# Supports both Firecrawl Cloud (api_key required) and self-hosted instances.
-# Self-hosted setup: https://github.com/firecrawl/firecrawl
-# Env overrides: FIRECRAWL_API_KEY, FIRECRAWL_API_URL
-#
-# Cloud usage (default):
-# firecrawl:
-#   api_key: "fc-..."                  # or set FIRECRAWL_API_KEY env var
-#
-# Self-hosted (e.g., Docker on localhost:3002):
-# firecrawl:
-#   api_url: "http://localhost:3002"   # no api_key needed for self-hosted
-#
-# Full options:
-# firecrawl:
-#   api_key: "fc-..."
-#   api_url: "https://api.firecrawl.dev"     # default; change for self-hosted
-#   defaults:
-#     only_main_content: true                # strip nav/footer from scrapes
-#     output_format: "markdown"              # "markdown" or "html"
-#     timeout_ms: 30000                      # per-request timeout
-#     max_content_length: 50000              # truncate content beyond this (bytes)
-#   rate_limit:
-#     max_requests: 30                       # requests per window
-#     window_seconds: 60                     # rate limit window
-#   cache_ttl_seconds: 3600                  # cache scrape/search results (1 hour)
-#   url_allowlist: []                        # if set, only these domains allowed (e.g., ["example.com", "docs.anthropic.com"])
-#   url_blocklist: []                        # these domains always blocked (e.g., ["malicious.com"])
-#
-# Available tools (once enabled):
-#   firecrawl_scrape        — Scrape a single URL → clean markdown
-#   firecrawl_crawl         — Start async website crawl (returns job ID)
-#   firecrawl_crawl_status  — Poll crawl job for progress/results
-#   firecrawl_map           — Discover all URLs on a site
-#   firecrawl_search        — Web search with content extraction
-#
-# Agent skill: activate "web-research" via skill_activate for guided
-# research strategies (quick facts, docs exploration, deep research).
-
-# Weather — NWS forecast, current conditions & alerts (free, no API key)
-# National Weather Service API provides free weather data for US locations.
-# No API key required — just specify default location coordinates.
-#
-# weather:
-#   default_latitude: 42.0314        # Fairview, PA
-#   default_longitude: -80.2553
-#   user_agent: "coda-agent/1.0 (weather-integration)"
-#   timeout_ms: 10000
-#   cache_ttl_seconds: 900           # 15 minutes for forecast
-#
-# Available tools (once enabled):
-#   weather_forecast  — Period forecast (Today, Tonight, Tomorrow, etc.)
-#   weather_current   — Current temp, humidity, wind from nearest station
-#   weather_alerts    — Active watches, warnings, and advisories
-#
-# Usage examples (in Discord/Slack):
-#   "What's the weather?"                     → uses default location
-#   "What's the weather in New York?"         → LLM passes coords 40.7128, -74.0060
-#   "Any weather alerts?"                     → checks for active alerts
-#
-# Caching strategy:
-#   - Grid/station mapping: 24 hours (static data)
-#   - Forecast data: 15 minutes
-#   - Current conditions: 5 minutes
-#   - Active alerts: 5 minutes
-
-# Doctor — self-healing and diagnostics
-# doctor:
-#   enabled: true
-#   pattern_window_seconds: 300       # time window for pattern detection
-#   pattern_threshold: 10             # errors with same signature to trigger alert
-#   skill_recovery_interval_seconds: 60  # how often to probe degraded skills
-#   max_error_history: 500            # ring buffer size for recent errors
-#   output_repair:
-#     enabled: true                   # repair malformed JSON from LLMs
-#     max_attempts: 2                 # LLM re-prompt attempts for repair
-#     quick_fix_only: true            # SECURITY: true = skip LLM repair (prevents injection attacks)
-#                                     #           false = enable LLM repair (EXPERIMENTAL - use with caution)
-
-# Security — sensitive tool access policy
-# security:
-#   sensitive_tool_policy: "log"   # "log" | "confirm_with_external" | "always_confirm"
-
-# Scheduler configuration (override built-in task schedules)
-# scheduler:
-#   tasks:
-#     "health.check":
-#       cron: "*/5 * * * *"
-#       enabled: true

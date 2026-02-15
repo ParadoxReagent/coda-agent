@@ -79,6 +79,68 @@ scheduler:
       enabled: true
 ```
 
+### Docker Executor
+
+Provides sandboxed code execution in ephemeral Docker containers. Enables agent skills (like PDF processing) to run code safely with strict resource limits and isolation.
+
+| Tool | Description |
+|------|-------------|
+| `code_execute` | Run a shell command in an ephemeral Docker container with configurable image, timeout, and network access |
+
+**Security features:**
+- Ephemeral containers (`--rm`) auto-destroyed after execution
+- Read-only root filesystem with limited `/tmp` tmpfs
+- Resource limits: memory, CPU, PIDs
+- Network disabled by default (`--network none`)
+- Only specified working directory mounted as writable
+- Image whitelist prevents arbitrary image execution
+- Requires user confirmation for sensitive operations
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+execution:
+  enabled: false                    # Must be explicitly enabled
+  docker_socket: "/var/run/docker.sock"
+  default_image: "python:3.12-slim"
+  timeout: 60                       # Max execution time in seconds
+  max_memory: "512m"                # Container memory limit
+  network_enabled: false            # Allow network access (default: false)
+  max_output_size: 52428800         # 50 MB max output file size
+  allowed_images:                   # Whitelist of allowed images (glob patterns)
+    - "python:*"
+    - "node:*"
+    - "ubuntu:*"
+    - "alpine:*"
+```
+
+**Environment variable overrides:**
+- `EXECUTION_ENABLED=true|false`
+- `EXECUTION_DEFAULT_IMAGE=python:3.12-slim`
+
+**Requirements:**
+- Docker installed and daemon running
+- User must have permission to access Docker socket
+- Allowed Docker images must be pulled before use
+
+**Integration with Agent Skills:**
+
+Agent skills can specify a `docker_image` in their SKILL.md frontmatter:
+
+```yaml
+---
+name: pdf
+description: "Process PDF files"
+docker_image: python:3.12-slim
+---
+```
+
+When the LLM activates the skill via `skill_activate`, it receives the `docker_image` field and can then call `code_execute` with the appropriate image.
+
+**Output files:**
+
+The container has access to files in the mounted working directory at `/workspace`. Commands can write output files to `/workspace/output/` — these files are automatically collected and returned to the user as attachments.
+
 ## Agent Skills
 
 coda supports the [Agent Skills standard](https://agentskills.io/specification) for loading community or custom instruction-based skills. Agent skills are directories containing a `SKILL.md` file with YAML frontmatter — no code required.

@@ -231,9 +231,15 @@ export class SubagentManager {
 
     const baseInstructions = options.workerInstructions ??
       `You are a sub-agent assistant. Complete the following task efficiently using the tools available to you. Be concise and focused.`;
+
+    const hasCodeExecute = options.toolsNeeded.includes("code_execute");
+    const codeExecGuidance = hasCodeExecute
+      ? `\n\nCode execution rules:\n- Use the code_execute tool to run code. NEVER paste code as text.\n- Write output files to /workspace/output/ so they are returned to the user.\n- Install dependencies inline: "pip install <pkg> && python script.py"`
+      : "";
+
     const systemPrompt = SUBAGENT_SAFETY_PREAMBLE + (options.workerInstructions
       ? `Task-specific instructions:\n${options.workerInstructions}`
-      : baseInstructions);
+      : baseInstructions) + codeExecGuidance;
 
     const agent = new BaseAgent(
       {
@@ -278,6 +284,14 @@ export class SubagentManager {
         inputTokens: result.totalTokens.input,
         outputTokens: result.totalTokens.output,
       });
+
+      // Return output files if present, wrapped in JSON for orchestrator's extractOutputFiles
+      if (result.outputFiles && result.outputFiles.length > 0) {
+        return JSON.stringify({
+          text: ContentSanitizer.sanitizeSubagentOutput(result.text),
+          output_files: result.outputFiles,
+        });
+      }
 
       return ContentSanitizer.sanitizeSubagentOutput(result.text);
     } catch (err) {
@@ -470,10 +484,17 @@ export class SubagentManager {
         userId: record.userId,
       });
 
+      const hasCodeExecuteAsync = record.allowedTools
+        ? record.allowedTools.includes("code_execute")
+        : this.config.safe_default_tools.includes("code_execute");
+      const codeExecGuidanceAsync = hasCodeExecuteAsync
+        ? `\n\nCode execution rules:\n- Use the code_execute tool to run code. NEVER paste code as text.\n- Write output files to /workspace/output/ so they are returned to the user.\n- Install dependencies inline: "pip install <pkg> && python script.py"`
+        : "";
+
       const agent = new BaseAgent(
         {
           name: `async-${runId.slice(0, 8)}`,
-          systemPrompt: SUBAGENT_SAFETY_PREAMBLE + "You are a sub-agent assistant. Complete the assigned task efficiently using the tools available. Be concise and thorough.",
+          systemPrompt: SUBAGENT_SAFETY_PREAMBLE + "You are a sub-agent assistant. Complete the assigned task efficiently using the tools available. Be concise and thorough." + codeExecGuidanceAsync,
           provider,
           model,
           allowedSkills: record.allowedTools

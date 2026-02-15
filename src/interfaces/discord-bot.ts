@@ -9,13 +9,17 @@ import {
   type Interaction,
   type Message,
 } from "discord.js";
+import { writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ProviderManager } from "../core/llm/manager.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { Logger } from "../utils/logger.js";
 import type { PreferencesManager } from "../core/preferences.js";
 import type { SubagentManager } from "../core/subagent-manager.js";
+import type { InboundAttachment } from "../core/types.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
+import { TempDirManager } from "../core/temp-dir.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -129,25 +133,112 @@ export class DiscordBot {
       await channel.sendTyping();
     }
 
+    let tempDir: string | undefined;
+
     try {
+      // Always create temp directory and output subdirectory for code execution
+      tempDir = await TempDirManager.create("coda-discord-");
+      const outputDir = join(tempDir, "output");
+      await mkdir(outputDir, { recursive: true });
+
+      // Download attachments if present
+      let attachments: InboundAttachment[] | undefined;
+      if (message.attachments.size > 0) {
+        attachments = [];
+
+        const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB (Discord default limit)
+
+        for (const [, attachment] of message.attachments) {
+          // Enforce file size limit
+          if (attachment.size > MAX_FILE_SIZE) {
+            await channel.send(
+              `File "${attachment.name}" is too large (${(attachment.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 25 MB.`
+            );
+            continue;
+          }
+
+          try {
+            const response = await fetch(attachment.url);
+            if (!response.ok) {
+              this.logger.warn(
+                { fileName: attachment.name, status: response.status },
+                "Failed to download attachment"
+              );
+              continue;
+            }
+
+            const buffer = Buffer.from(await response.arrayBuffer());
+            const localPath = join(tempDir, attachment.name);
+            await writeFile(localPath, buffer);
+
+            attachments.push({
+              name: attachment.name,
+              localPath,
+              mimeType: attachment.contentType ?? undefined,
+              sizeBytes: attachment.size,
+            });
+
+            this.logger.debug(
+              { fileName: attachment.name, size: attachment.size },
+              "Downloaded attachment"
+            );
+          } catch (err) {
+            this.logger.error(
+              { fileName: attachment.name, error: err },
+              "Error downloading attachment"
+            );
+          }
+        }
+
+        if (attachments.length === 0) {
+          attachments = undefined;
+        }
+      }
+
       const response = await this.orchestrator.handleMessage(
         message.author.id,
         message.content,
-        "discord"
+        "discord",
+        attachments,
+        tempDir
       );
 
       // Sanitize output to prevent mass mentions and invite spam
-      const sanitized = ContentSanitizer.sanitizeForDiscord(response);
+      const sanitized = ContentSanitizer.sanitizeForDiscord(response.text);
 
       // Handle long responses (Discord 2000 char limit)
-      for (const chunk of chunkResponse(sanitized, 1900)) {
-        await channel.send(chunk);
+      const chunks = chunkResponse(sanitized, 1900);
+
+      // Send first chunk with files if present
+      if (response.files && response.files.length > 0) {
+        await channel.send({
+          content: chunks[0] ?? "",
+          files: response.files.map((f) => ({
+            attachment: f.path,
+            name: f.name,
+          })),
+        });
+
+        // Send remaining chunks without files
+        for (let i = 1; i < chunks.length; i++) {
+          await channel.send(chunks[i]!);
+        }
+      } else {
+        // No files, send chunks normally
+        for (const chunk of chunks) {
+          await channel.send(chunk);
+        }
       }
     } catch (err) {
       this.logger.error({ error: err }, "Orchestrator error");
       await channel.send(
         "Sorry, I encountered an error processing your message. Please try again."
       );
+    } finally {
+      // Clean up temp directory
+      if (tempDir) {
+        await TempDirManager.cleanup(tempDir);
+      }
     }
   }
 
@@ -219,7 +310,7 @@ export class DiscordBot {
           "Give me my morning briefing",
           "discord"
         );
-        const chunks = chunkResponse(response, 1900);
+        const chunks = chunkResponse(response.text, 1900);
         await interaction.editReply(chunks[0] ?? "No briefing data available.");
         for (let i = 1; i < chunks.length; i++) {
           await interaction.followUp(chunks[i]!);

@@ -80,3 +80,58 @@ firecrawl:
 ### Agent Skill: Web Research
 
 Activate the `web-research` agent skill via `skill_activate` for guided research strategies including quick fact-finding, documentation exploration, and deep multi-source research. See [skills_readme.md](skills_readme.md#web-research) for details.
+
+## Interfaces
+
+### Discord
+
+The Discord interface supports file attachments for both inbound and outbound messages.
+
+**Inbound file attachments:**
+- Users can upload files (images, PDFs, documents, etc.) with their messages
+- Files are downloaded to a temporary directory and made available to the LLM
+- File metadata (name, size, MIME type, local path) is included in the message context
+- Maximum file size: 25 MB per file (Discord default limit)
+- Files are automatically cleaned up after processing
+
+**Outbound file attachments:**
+- Agent skills can generate output files (e.g., processed PDFs, reports, images)
+- Files are automatically attached to the bot's response message
+- Multiple files can be sent in a single response
+- Files are sent along with the text response
+
+**Example workflow:**
+1. User uploads a PDF file in Discord with message "Extract text from this PDF"
+2. LLM activates PDF skill, receives file location
+3. LLM calls `code_execute` with Python script to process PDF
+4. Docker container processes PDF and writes output to `/workspace/output/`
+5. Output files are sent back to user as Discord attachments
+
+### Slack
+
+The Slack interface supports file attachments for both inbound and outbound messages.
+
+**Inbound file attachments:**
+- Users can upload files with their messages
+- Files are downloaded using Slack's private download URLs with bot token authorization
+- File metadata is included in message context
+- Maximum file size: 25 MB per file
+- Temporary files are cleaned up after processing
+
+**Outbound file attachments:**
+- Output files are uploaded to the same channel/thread using `files.uploadV2` API
+- Requires `files:write` OAuth scope for the Slack bot
+- Multiple files can be uploaded in response to a single message
+
+**OAuth scopes required:**
+- `app_mentions:read` — Read mentions
+- `chat:write` — Send messages
+- `files:read` — Download user-uploaded files
+- `files:write` — Upload response files
+- `reactions:write` — Add reaction indicators
+
+**Example workflow:**
+1. User uploads a document in Slack thread
+2. Bot downloads file using `url_private_download` with authorization
+3. LLM processes file (e.g., via agent skill with code execution)
+4. Bot uploads result file(s) to the same thread using `files.uploadV2`

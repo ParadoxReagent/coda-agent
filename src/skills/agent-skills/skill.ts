@@ -4,13 +4,22 @@ import type { AgentSkillDiscovery } from "../agent-skill-discovery.js";
 
 export class AgentSkillsSkill implements Skill {
   readonly name = "agent-skills";
-  readonly description =
-    "Activate and read resources from instruction-based agent skills";
+
+  get description(): string {
+    const skills = this.discovery.getSkillMetadataList();
+    if (skills.length === 0) {
+      return "Activate and read resources from instruction-based agent skills";
+    }
+    const skillNames = skills.map(s => s.name).join(", ");
+    return `${skills.length} agent skill${skills.length === 1 ? '' : 's'}: ${skillNames}`;
+  }
 
   private discovery: AgentSkillDiscovery;
+  private hasCodeExecution: boolean;
 
-  constructor(discovery: AgentSkillDiscovery) {
+  constructor(discovery: AgentSkillDiscovery, hasCodeExecution = false) {
     this.discovery = discovery;
+    this.hasCodeExecution = hasCodeExecution;
   }
 
   getTools(): SkillToolDefinition[] {
@@ -98,12 +107,22 @@ export class AgentSkillsSkill implements Skill {
     try {
       const instructions = this.discovery.activateSkill(skillName);
       const resources = this.discovery.listResources(skillName);
+      const metadata = this.discovery
+        .getSkillMetadataList()
+        .find((s) => s.name === skillName);
+
+      const executionNote = this.hasCodeExecution && metadata?.docker_image
+        ? `IMPORTANT: Use the code_execute tool to run the code from these instructions. Use image="${metadata.docker_image}" and the working_dir from the message context. Write output files to /workspace/output/. Do NOT paste code for the user to run manually.`
+        : undefined;
 
       return JSON.stringify({
         success: true,
         skill: skillName,
         instructions,
         resources: resources.length > 0 ? resources : undefined,
+        docker_image: metadata?.docker_image,
+        dependencies: metadata?.dependencies,
+        execution_note: executionNote,
         message:
           resources.length > 0
             ? `Skill "${skillName}" activated. ${resources.length} resource(s) available — use skill_read_resource to access them.`

@@ -43,6 +43,7 @@ export interface AgentRunResult {
   totalTokens: { input: number; output: number };
   toolCallCount: number;
   transcript: TranscriptEntry[];
+  outputFiles: Array<{ name: string; path: string; mimeType?: string }>;
 }
 
 export interface TranscriptEntry {
@@ -55,6 +56,7 @@ export interface TranscriptEntry {
 export class BaseAgent {
   private transcript: TranscriptEntry[] = [];
   private tools: LLMToolDefinition[];
+  private outputFiles: Array<{ name: string; path: string; mimeType?: string }> = [];
 
   constructor(
     private config: BaseAgentConfig,
@@ -203,6 +205,25 @@ export class BaseAgent {
           this.logger
         );
         results.push({ toolCallId: tc.id, toolName: tc.name, result });
+
+        // Extract output files from tool result
+        try {
+          const parsed = JSON.parse(result);
+          if (parsed.output_files && Array.isArray(parsed.output_files)) {
+            const files = parsed.output_files.filter(
+              (f: unknown): f is { name: string; path: string; mimeType?: string } =>
+                typeof f === "object" &&
+                f !== null &&
+                "name" in f &&
+                "path" in f &&
+                typeof f.name === "string" &&
+                typeof f.path === "string"
+            );
+            this.outputFiles.push(...files);
+          }
+        } catch {
+          // Result is not JSON or doesn't contain output_files
+        }
       } catch (err) {
         this.logger.error(
           { agent: this.config.name, toolName: tc.name, error: err },
@@ -253,6 +274,7 @@ export class BaseAgent {
       totalTokens: { input: inputTokens, output: outputTokens },
       toolCallCount,
       transcript: this.getTranscript(),
+      outputFiles: [...this.outputFiles],
     };
   }
 }
