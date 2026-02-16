@@ -214,9 +214,11 @@ async function main() {
   }
 
   // MCP servers
+  let mcpManager: any = undefined;
   if (config.mcp?.servers && Object.keys(config.mcp.servers).length > 0) {
     const { createMcpSkills } = await import("./integrations/mcp/factory.js");
-    const mcpSkills = await createMcpSkills(config.mcp, logger);
+    const { skills: mcpSkills, manager } = await createMcpSkills(config.mcp, logger);
+    mcpManager = manager;
     for (const { skill } of mcpSkills) {
       try {
         skillRegistry.register(skill);
@@ -478,6 +480,7 @@ async function main() {
     await discordBot.stop();
     if (slackBot) await slackBot.stop();
     await restApi.stop();
+    if (mcpManager) await mcpManager.shutdown();
     await skillRegistry.shutdownAll();
     taskScheduler.shutdown();
     if (redisEventBus) {

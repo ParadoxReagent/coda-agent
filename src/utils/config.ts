@@ -265,6 +265,8 @@ const McpServerConfigSchema = z.object({
   description: z.string().optional(),
   max_response_size: z.number().default(100000),
   auto_refresh_tools: z.boolean().default(false),
+  startup_mode: z.enum(["eager", "lazy"]).default("eager"),
+  idle_timeout_minutes: z.number().optional(), // undefined = no timeout
 });
 
 const McpConfigSchema = z.object({
@@ -440,6 +442,26 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     const tiers = ensureObject(llm, "tiers");
     const heavy = ensureObject(tiers, "heavy");
     heavy.model = process.env.TIER_HEAVY_MODEL;
+  }
+  if (process.env.TIER_LIGHT_PROVIDER) {
+    const tiers = ensureObject(llm, "tiers");
+    const light = ensureObject(tiers, "light");
+    light.provider = process.env.TIER_LIGHT_PROVIDER;
+  }
+  if (process.env.TIER_HEAVY_PROVIDER) {
+    const tiers = ensureObject(llm, "tiers");
+    const heavy = ensureObject(tiers, "heavy");
+    heavy.provider = process.env.TIER_HEAVY_PROVIDER;
+  }
+
+  // Default tier providers to default_provider if tiers are enabled but providers aren't set
+  if (process.env.TIER_ENABLED === "true") {
+    const tiers = ensureObject(llm, "tiers");
+    const light = ensureObject(tiers, "light");
+    const heavy = ensureObject(tiers, "heavy");
+    const defaultProv = (llm.default_provider as string) || Object.keys(providers)[0] || "anthropic";
+    if (!light.provider) light.provider = defaultProv;
+    if (!heavy.provider) heavy.provider = defaultProv;
   }
 
   // Execution overrides

@@ -2,7 +2,7 @@ import type { Skill, SkillToolDefinition } from "../../skills/base.js";
 import type { SkillContext } from "../../skills/context.js";
 import type { McpServerConfig } from "../../utils/config.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { McpClientWrapper } from "./client.js";
+import type { McpServerManager } from "./manager.js";
 import { mapMcpToolToSkillTool, extractMcpToolName } from "./schema-mapper.js";
 import { sanitizeMcpResponse, truncateMcpResponse } from "./sanitizer.js";
 
@@ -11,21 +11,23 @@ export class McpServerSkill implements Skill {
   readonly description: string;
   readonly kind = "integration" as const;
 
+  private serverName: string;
   private config: McpServerConfig;
   private tools: SkillToolDefinition[];
-  private client: McpClientWrapper;
+  private manager: McpServerManager;
 
   constructor(
     serverName: string,
     config: McpServerConfig,
     tools: Tool[],
-    client: McpClientWrapper
+    manager: McpServerManager
   ) {
+    this.serverName = serverName;
     this.config = config;
     this.name = `mcp_${serverName}`;
     this.description =
       config.description ?? `MCP server integration: ${serverName}`;
-    this.client = client;
+    this.manager = manager;
 
     // Pre-map tools to SkillToolDefinitions
     this.tools = tools.map((tool) =>
@@ -45,8 +47,23 @@ export class McpServerSkill implements Skill {
     const mcpToolName = extractMcpToolName(toolName);
 
     try {
-      // Call MCP tool
-      const result = await this.client.callTool(mcpToolName, toolInput);
+      // Ensure connected (lazy initialization)
+      const tools = await this.manager.ensureConnected(this.serverName);
+
+      // Update tools if this is the first connection (lazy mode)
+      if (this.tools.length === 0 && tools.length > 0) {
+        this.tools = tools.map((tool) =>
+          mapMcpToolToSkillTool(tool, this.serverName, this.config)
+        );
+      }
+
+      // Get client and call MCP tool
+      const client = this.manager.getClient(this.serverName);
+      if (!client) {
+        throw new Error(`MCP client not found for server: ${this.serverName}`);
+      }
+
+      const result = await client.callTool(mcpToolName, toolInput);
 
       // Truncate response if needed
       const { content, truncated } = truncateMcpResponse(
@@ -95,10 +112,10 @@ export class McpServerSkill implements Skill {
   }
 
   async startup(_ctx: SkillContext): Promise<void> {
-    // Client is already connected by factory
+    // Connection handled by manager (eager or lazy)
   }
 
   async shutdown(): Promise<void> {
-    await this.client.disconnect();
+    // Disconnection handled by manager
   }
 }

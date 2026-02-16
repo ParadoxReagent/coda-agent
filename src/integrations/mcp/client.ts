@@ -10,6 +10,8 @@ export class McpClientWrapper {
   private client: Client;
   private transport?: Transport;
   private config: McpServerConfig;
+  private connected: boolean = false;
+  private lastActivityTime: number = Date.now();
 
   constructor(_serverName: string, config: McpServerConfig) {
     this.config = config;
@@ -57,6 +59,8 @@ export class McpClientWrapper {
     try {
       this.transport = this.createTransport(this.config.transport);
       await this.client.connect(this.transport);
+      this.connected = true;
+      this.lastActivityTime = Date.now();
     } finally {
       clearTimeout(timeout);
     }
@@ -73,11 +77,14 @@ export class McpClientWrapper {
       }
     } catch (err) {
       // Ignore disconnect errors
+    } finally {
+      this.connected = false;
     }
   }
 
   /** List available tools from the MCP server. */
   async listTools(): Promise<Tool[]> {
+    this.lastActivityTime = Date.now();
     const response = await this.client.listTools();
     return response.tools;
   }
@@ -87,6 +94,8 @@ export class McpClientWrapper {
     toolName: string,
     args: Record<string, unknown>
   ): Promise<McpToolCallResult> {
+    this.lastActivityTime = Date.now();
+
     const abortController = new AbortController();
     const timeout = setTimeout(() => {
       abortController.abort();
@@ -134,5 +143,20 @@ export class McpClientWrapper {
     }
 
     return parts.join("\n");
+  }
+
+  /** Check if the client is currently connected. */
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  /** Get idle time in milliseconds since last activity. */
+  getIdleTimeMs(): number {
+    return Date.now() - this.lastActivityTime;
+  }
+
+  /** Get idle time in minutes since last activity. */
+  getIdleTimeMinutes(): number {
+    return Math.floor(this.getIdleTimeMs() / 60000);
   }
 }

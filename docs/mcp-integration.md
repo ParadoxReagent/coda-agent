@@ -7,6 +7,8 @@ The MCP integration allows coda-agent to connect to external MCP servers and use
 - [Overview](#overview)
 - [Configuration](#configuration)
 - [Transport Types](#transport-types)
+- [Docker-based MCP Servers](#docker-based-mcp-servers)
+- [Lazy Initialization and Idle Timeouts](#lazy-initialization-and-idle-timeouts)
 - [Deployment Scenarios](#deployment-scenarios)
 - [Security](#security)
 - [Tool Management](#tool-management)
@@ -35,6 +37,8 @@ mcp:
       description: string
       max_response_size: number
       auto_refresh_tools: boolean
+      startup_mode: eager|lazy
+      idle_timeout_minutes: number
 ```
 
 ### Configuration Fields
@@ -52,6 +56,8 @@ mcp:
 | `description` | string | auto | Custom skill description |
 | `max_response_size` | number | `100000` | Max response size (bytes) |
 | `auto_refresh_tools` | boolean | `false` | Listen for tool list changes |
+| `startup_mode` | `eager`\|`lazy` | `eager` | When to connect: eager=startup, lazy=first use |
+| `idle_timeout_minutes` | number | - | Auto-disconnect after idle time (optional) |
 
 ## Transport Types
 
@@ -92,6 +98,284 @@ transport:
 - Docker containers
 - Microservices architecture
 - Load-balanced deployments
+
+## Docker-based MCP Servers
+
+Docker-based MCP servers provide a clean, reproducible pattern for packaging MCP servers with their dependencies. The existing stdio transport can spawn Docker containers as child processes, requiring **zero MCP client code changes**.
+
+### How It Works
+
+1. **Build the Image**: Package the MCP server as a Docker image (e.g., `coda-mcp-context7`)
+2. **Configure stdio Transport**: Use `docker run -i --rm` as the command
+3. **Start coda-agent**: The stdio transport spawns the container and communicates via stdin/stdout
+
+The Docker CLI is already installed in the coda-core image, and the Docker socket is mounted, so containers can be spawned from within the running coda-agent container.
+
+### Example: Context7 MCP Server
+
+Context7 provides live documentation and code examples for programming libraries. Here's how to set it up:
+
+**1. Create the Dockerfile** (`src/integrations/mcp/servers/context7/Dockerfile`):
+
+```dockerfile
+FROM node:22-alpine
+RUN npm install -g @upstash/context7-mcp@latest
+CMD ["context7-mcp"]
+```
+
+**2. Build the image**:
+
+```bash
+# Option 1: Using npm script (builds all MCP servers)
+npm run build:mcp-images
+
+# Option 2: Using docker-compose
+docker compose --profile mcp-build build context7-mcp
+
+# Option 3: Direct docker build
+docker build -t coda-mcp-context7 src/integrations/mcp/servers/context7/
+```
+
+**3. Configure in `config.yaml`**:
+
+```yaml
+mcp:
+  servers:
+    context7:
+      enabled: true
+      transport:
+        type: stdio
+        command: docker
+        args: ["run", "-i", "--rm", "coda-mcp-context7"]
+      description: "Context7 - Up-to-date documentation and code examples"
+      tool_timeout_ms: 60000
+```
+
+**4. Start coda-agent**:
+
+```bash
+docker compose up -d
+```
+
+Context7 tools will now be available as `mcp_context7_*` skills.
+
+### Building All MCP Server Images
+
+The build script scans `src/integrations/mcp/servers/*/Dockerfile` and builds each image:
+
+```bash
+# Build all servers
+npm run build:mcp-images
+
+# Build specific server
+npm run build:mcp-images -- context7
+
+# Force rebuild
+npm run build:mcp-images -- --force
+
+# Dry run (see what would be built)
+npm run build:mcp-images -- --dry-run
+```
+
+### Adding a New Docker-based MCP Server
+
+To add a new MCP server (e.g., "myserver"):
+
+**1. Create Dockerfile** at `src/integrations/mcp/servers/myserver/Dockerfile`:
+
+```dockerfile
+FROM python:3.12-slim
+RUN pip install my-mcp-server-package
+CMD ["my-mcp-server"]
+```
+
+**2. Add docker-compose build target** in `docker-compose.yml`:
+
+```yaml
+services:
+  # ... existing services ...
+
+  myserver-mcp:
+    build:
+      context: ./src/integrations/mcp/servers/myserver
+    image: coda-mcp-myserver
+    profiles:
+      - mcp-build
+```
+
+**3. Add configuration** in `config.yaml`:
+
+```yaml
+mcp:
+  servers:
+    myserver:
+      enabled: true
+      transport:
+        type: stdio
+        command: docker
+        args: ["run", "-i", "--rm", "coda-mcp-myserver"]
+      description: "My custom MCP server"
+```
+
+**4. Build and start**:
+
+```bash
+npm run build:mcp-images
+docker compose up -d
+```
+
+**No TypeScript changes needed.** The MCP client automatically discovers and registers tools from any configured server.
+
+### Advantages of Docker-based Servers
+
+- **Dependency Isolation**: Each server has its own environment (Python, Node, etc.)
+- **Reproducible Builds**: Same image works everywhere
+- **Version Pinning**: Lock MCP server versions in Dockerfiles
+- **Easy Distribution**: Share images via Docker Hub or private registries
+- **Security**: Run servers in isolated containers
+- **No Local Dependencies**: Don't need Python/Node/etc. installed on host
+
+### Environment Variables
+
+If your Docker-based server needs environment variables, pass them via `env` in the transport config:
+
+```yaml
+transport:
+  type: stdio
+  command: docker
+  args:
+    - "run"
+    - "-i"
+    - "--rm"
+    - "-e"
+    - "API_KEY=${MY_API_KEY}"
+    - "coda-mcp-myserver"
+```
+
+Or use Docker's `--env-file` flag to load from a file.
+
+### Enabling/Disabling Servers
+
+Control server availability via the `enabled` flag:
+
+```yaml
+context7:
+  enabled: false  # Disabled - won't connect on startup
+```
+
+This allows you to:
+- Disable servers temporarily without removing config
+- Enable different servers per environment (dev/staging/prod)
+- Control which tools are available to the LLM
+
+## Lazy Initialization and Idle Timeouts
+
+MCP servers support two lifecycle features to optimize resource usage:
+
+### Startup Modes
+
+**Eager Mode (Default)**
+- Server connects immediately at coda-agent startup
+- Tools are discovered and registered before any requests
+- Best for: Frequently-used servers, low startup latency requirements
+
+**Lazy Mode**
+- Server doesn't connect until first tool call
+- Tools are discovered on-demand
+- Best for: Rarely-used servers, resource-constrained environments
+
+```yaml
+mcp:
+  servers:
+    # Eager - connects immediately
+    github:
+      enabled: true
+      startup_mode: eager  # Default
+      transport:
+        type: http
+        url: https://mcp-github.example.com
+
+    # Lazy - waits for first use
+    context7:
+      enabled: true
+      startup_mode: lazy  # Connect on first tool call
+      transport:
+        type: stdio
+        command: docker
+        args: ["run", "-i", "--rm", "coda-mcp-context7"]
+```
+
+### Idle Timeouts
+
+Automatically disconnect servers after a period of inactivity to free resources:
+
+```yaml
+context7:
+  enabled: true
+  startup_mode: lazy
+  idle_timeout_minutes: 30  # Disconnect after 30 minutes idle
+  transport:
+    type: stdio
+    command: docker
+    args: ["run", "-i", "--rm", "coda-mcp-context7"]
+```
+
+**How it works:**
+1. Server connects (immediately or on first use)
+2. Activity tracked on every tool call or tool list request
+3. Background monitor checks idle time every minute
+4. If idle time exceeds `idle_timeout_minutes`, server disconnects
+5. Next tool call will reconnect automatically (lazy initialization)
+
+**When to use:**
+- ✅ Docker-based servers (fast restart, no state)
+- ✅ HTTP servers that can handle reconnections
+- ✅ Servers with expensive idle resource usage
+- ❌ Servers that maintain critical state between calls
+- ❌ Servers with very slow startup times (unless rarely used)
+
+### Best Practices
+
+**For Lightweight Servers (e.g., Context7, simple APIs):**
+```yaml
+startup_mode: lazy
+idle_timeout_minutes: 15
+```
+Minimize resource usage, fast reconnection.
+
+**For Heavy Servers (e.g., database connections, ML models):**
+```yaml
+startup_mode: eager
+idle_timeout_minutes: 60  # Or omit for no timeout
+```
+Accept resource cost, avoid startup latency.
+
+**For Frequently-Used Servers:**
+```yaml
+startup_mode: eager
+# No idle_timeout_minutes - stay connected
+```
+Always available, no reconnection overhead.
+
+**For Rarely-Used Servers:**
+```yaml
+startup_mode: lazy
+idle_timeout_minutes: 5
+```
+Aggressive cleanup, acceptable startup delay.
+
+### Monitoring
+
+Check server connection status in logs:
+
+```
+[info] MCP server registered (lazy mode, will connect on first use)
+[info] Connecting to MCP server (lazy init)
+[info] MCP server connected and tools discovered
+[info] MCP server idle timeout reached, disconnecting (idleMinutes=30, timeout=30)
+```
+
+The idle timeout monitor runs every minute and logs when servers are disconnected.
 
 ## Deployment Scenarios
 

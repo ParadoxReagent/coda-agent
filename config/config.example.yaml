@@ -129,6 +129,19 @@ weather: {}         # Free NWS API, no key needed
 #       tool_timeout_ms: 120000  # 2 minutes for large PDFs
 #       max_response_size: 500000  # 500KB for extracted text/tables
 #
+#     # Context7 - Live documentation and code examples (Docker-based)
+#     # Build image first: npm run build:mcp-images
+#     context7:
+#       enabled: true
+#       transport:
+#         type: stdio
+#         command: docker
+#         args: ["run", "-i", "--rm", "coda-mcp-context7"]
+#       description: "Context7 - Up-to-date documentation and code examples for libraries"
+#       tool_timeout_ms: 60000
+#       startup_mode: lazy  # eager (default) or lazy - lazy waits for first use
+#       idle_timeout_minutes: 30  # Auto-disconnect after 30min idle (optional)
+#
 #     # Example 2: Local filesystem access via stdio
 #     # Runs an MCP server as a child process
 #     filesystem:

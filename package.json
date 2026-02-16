@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "build:skill-images": "tsx src/scripts/build-skill-images.ts",
+    "build:mcp-images": "tsx src/scripts/build-mcp-images.ts",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "test": "vitest run",

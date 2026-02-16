@@ -104,6 +104,14 @@ services:
       timeout: 3s
       retries: 5
 
+  # MCP Server Images (build-only, never started)
+  context7-mcp:
+    build:
+      context: ./src/integrations/mcp/servers/context7
+    image: coda-mcp-context7
+    profiles:
+      - mcp-build
+
 volumes:
   coda-data:
   redis-data:

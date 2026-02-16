@@ -1,23 +1,30 @@
 import type { McpConfig } from "../../utils/config.js";
 import type { Logger } from "../../utils/logger.js";
-import { McpClientWrapper } from "./client.js";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { McpServerManager } from "./manager.js";
 import { McpServerSkill } from "./skill.js";
-import { filterMcpTools } from "./schema-mapper.js";
 
 export interface McpSkillResult {
   skill: McpServerSkill;
 }
 
+export interface McpFactoryResult {
+  skills: McpSkillResult[];
+  manager: McpServerManager;
+}
+
 /**
  * Create MCP skills for all enabled servers in config.
- * Connects to each server, discovers tools, and returns ready-to-register skills.
- * Failed connections are logged and skipped.
+ * Supports lazy initialization - eager servers connect immediately,
+ * lazy servers connect on first use.
+ * Returns skills and manager for lifecycle management.
  */
 export async function createMcpSkills(
   config: McpConfig,
   logger: Logger
-): Promise<McpSkillResult[]> {
-  const results: McpSkillResult[] = [];
+): Promise<McpFactoryResult> {
+  const manager = new McpServerManager(logger);
+  const skills: McpSkillResult[] = [];
 
   for (const [serverName, serverConfig] of Object.entries(config.servers)) {
     // Skip disabled servers
@@ -26,46 +33,50 @@ export async function createMcpSkills(
       continue;
     }
 
+    // Register server (creates client but doesn't connect yet)
+    manager.registerServer(serverName, serverConfig);
+
     try {
-      logger.info({ server: serverName }, "Connecting to MCP server");
+      let tools: Tool[];
 
-      // Create and connect client
-      const client = new McpClientWrapper(serverName, serverConfig);
-      await client.connect();
+      // For eager mode, connect immediately
+      if (serverConfig.startup_mode === "eager") {
+        logger.info({ server: serverName }, "Connecting to MCP server (eager mode)");
+        tools = await manager.ensureConnected(serverName);
+      } else {
+        // Lazy mode - connect on first use
+        logger.info({ server: serverName }, "MCP server registered (lazy mode, will connect on first use)");
+        tools = []; // No tools yet, will be discovered on first connection
+      }
 
-      // Discover and filter tools
-      const allTools = await client.listTools();
-      const filteredTools = filterMcpTools(allTools, serverConfig);
-
-      logger.info(
-        {
-          server: serverName,
-          totalTools: allTools.length,
-          filteredTools: filteredTools.length,
-          blocked: serverConfig.tool_blocklist,
-        },
-        "MCP server connected and tools discovered"
-      );
-
-      // Create skill with pre-connected client
+      // Create skill
       const skill = new McpServerSkill(
         serverName,
         serverConfig,
-        filteredTools,
-        client
+        tools,
+        manager
       );
 
-      results.push({ skill });
+      skills.push({ skill });
     } catch (err) {
       logger.error(
         {
           server: serverName,
           error: err instanceof Error ? err.message : String(err),
         },
-        "Failed to connect to MCP server, skipping"
+        "Failed to initialize MCP server, skipping"
       );
     }
   }
 
-  return results;
+  // Start idle timeout monitor if any server has timeout configured
+  const hasTimeouts = Object.values(config.servers).some(
+    (s) => s.enabled && s.idle_timeout_minutes !== undefined
+  );
+
+  if (hasTimeouts) {
+    manager.startIdleTimeoutMonitor();
+  }
+
+  return { skills, manager };
 }
