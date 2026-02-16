@@ -2,6 +2,96 @@
 
 External service connectors that require credentials and/or polling. Located in `src/integrations/`.
 
+## MCP (Model Context Protocol)
+
+Connect to external [MCP servers](https://modelcontextprotocol.io/) and use their tools as first-class coda skills. Each MCP server becomes a separate skill with tools namespaced as `mcp_{serverName}_{toolName}`.
+
+**Supported Transports:**
+- **stdio** — Local process execution (for official MCP servers like `@modelcontextprotocol/server-filesystem`)
+- **http** — Remote HTTP endpoints (for containerized/remote MCP services)
+
+**Example Tools** (from `@modelcontextprotocol/server-filesystem`):
+- `mcp_filesystem_read_file` — Read a file from the filesystem
+- `mcp_filesystem_list_directory` — List directory contents
+- `mcp_filesystem_search_files` — Search for files by pattern
+
+### Setup
+
+**Local stdio server:**
+
+```yaml
+mcp:
+  servers:
+    filesystem:
+      enabled: true
+      transport:
+        type: stdio
+        command: npx
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+      tool_blocklist: ["write_file", "delete_file"]  # Read-only mode
+```
+
+**Remote HTTP server:**
+
+```yaml
+mcp:
+  servers:
+    github:
+      enabled: true
+      transport:
+        type: http
+        url: https://mcp-github.example.com
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"  # From env
+      requires_confirmation: ["create_issue"]
+```
+
+**Docker container (same network):**
+
+```yaml
+mcp:
+  servers:
+    database:
+      enabled: true
+      transport:
+        type: http
+        url: http://mcp-database-service:8080
+      tool_allowlist: ["query_read_only", "list_tables"]
+```
+
+### Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable/disable this server |
+| `transport.type` | `stdio\|http` | required | Transport type |
+| `timeout_ms` | number | `30000` | Connection timeout |
+| `tool_timeout_ms` | number | `60000` | Per-tool execution timeout |
+| `tool_allowlist` | string[] | - | Only allow these tools |
+| `tool_blocklist` | string[] | `[]` | Block these tools |
+| `requires_confirmation` | string[] | `[]` | Tools requiring user approval |
+| `sensitive_tools` | string[] | `[]` | Mark tools as sensitive (logged) |
+| `max_response_size` | number | `100000` | Max response size (bytes) |
+
+**Environment variable substitution** is supported in all string fields using `${VAR_NAME}` syntax.
+
+### Security
+
+- All MCP responses are wrapped in `<external_data>` tags with injection warnings
+- Responses are truncated to `max_response_size` (default 100KB)
+- Tools can be filtered at discovery time with allowlist/blocklist
+- Dangerous operations can require user confirmation
+- Always use HTTPS for remote URLs (except localhost/internal networks)
+
+### Documentation
+
+See [docs/mcp-integration.md](docs/mcp-integration.md) for complete documentation including:
+- All configuration options
+- Docker deployment examples
+- Kubernetes configuration
+- Security best practices
+- Troubleshooting guide
+
 ## n8n
 
 Ingests events from [n8n](https://n8n.io) automation workflows. Accepts any event type — emails, GitHub PRs, server alerts, etc.

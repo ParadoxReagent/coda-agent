@@ -92,16 +92,38 @@ describe("ConfirmationManager", () => {
     expect(manager.isConfirmationMessage("")).toBeNull();
   });
 
-  it("cleanup removes expired tokens", () => {
+  it("cleanup removes expired tokens", async () => {
     manager.createConfirmation("user1", "test", "tool1", {}, "desc1");
     manager.createConfirmation("user1", "test", "tool2", {}, "desc2");
 
     vi.useFakeTimers();
     vi.advanceTimersByTime(6 * 60 * 1000);
 
-    manager.cleanup();
+    await manager.cleanup();
 
     // Both should be expired
     vi.useRealTimers();
+  });
+
+  it("stores and returns tempDir with pending action", () => {
+    const token = manager.createConfirmation(
+      "user1", "code", "code_execute", { code: "test" }, "Execute code", "/tmp/test-dir"
+    );
+
+    const action = manager.consumeConfirmation(token, "user1");
+
+    expect(action).not.toBeNull();
+    expect(action!.tempDir).toBe("/tmp/test-dir");
+  });
+
+  it("action without tempDir returns undefined for tempDir", () => {
+    const token = manager.createConfirmation(
+      "user1", "test", "test_tool", {}, "desc"
+    );
+
+    const action = manager.consumeConfirmation(token, "user1");
+
+    expect(action).not.toBeNull();
+    expect(action!.tempDir).toBeUndefined();
   });
 });

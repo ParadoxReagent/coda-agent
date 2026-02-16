@@ -2,6 +2,7 @@ import { generateConfirmationToken } from "../utils/crypto.js";
 import { RETENTION } from "../utils/retention.js";
 import type { Logger } from "../utils/logger.js";
 import type { EventBus } from "./events.js";
+import { TempDirManager } from "./temp-dir.js";
 
 interface PendingAction {
   token: string;
@@ -11,6 +12,7 @@ interface PendingAction {
   toolInput: Record<string, unknown>;
   description: string;
   expiresAt: number;
+  tempDir?: string;
 }
 
 const ABUSE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -38,7 +40,8 @@ export class ConfirmationManager {
     skillName: string,
     toolName: string,
     toolInput: Record<string, unknown>,
-    description: string
+    description: string,
+    tempDir?: string
   ): string {
     const token = generateConfirmationToken();
     const expiresAt =
@@ -52,10 +55,11 @@ export class ConfirmationManager {
       toolInput,
       description,
       expiresAt,
+      tempDir,
     });
 
     this.logger.debug(
-      { userId, skillName, toolName },
+      { userId, skillName, toolName, hasTempDir: !!tempDir },
       "Confirmation token created"
     );
 
@@ -151,11 +155,26 @@ export class ConfirmationManager {
   }
 
   /** Clean up expired tokens (called periodically). */
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     const now = Date.now();
     for (const [token, action] of this.pendingActions) {
       if (now > action.expiresAt) {
         this.pendingActions.delete(token);
+        // Clean up associated temp directory if it exists
+        if (action.tempDir) {
+          try {
+            await TempDirManager.cleanup(action.tempDir);
+            this.logger.debug(
+              { token: token.slice(0, 4) + "...", tempDir: action.tempDir },
+              "Cleaned up temp directory for expired token"
+            );
+          } catch (err) {
+            this.logger.warn(
+              { token: token.slice(0, 4) + "...", tempDir: action.tempDir, error: err },
+              "Failed to clean up temp directory for expired token"
+            );
+          }
+        }
       }
     }
   }

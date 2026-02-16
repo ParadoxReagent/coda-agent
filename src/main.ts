@@ -1,3 +1,8 @@
+import dotenv from "dotenv";
+
+// Load .env file before anything else
+dotenv.config();
+
 import { loadConfig } from "./utils/config.js";
 import { createLogger } from "./utils/logger.js";
 import { ProviderManager } from "./core/llm/manager.js";
@@ -208,6 +213,19 @@ async function main() {
     }
   }
 
+  // MCP servers
+  if (config.mcp?.servers && Object.keys(config.mcp.servers).length > 0) {
+    const { createMcpSkills } = await import("./integrations/mcp/factory.js");
+    const mcpSkills = await createMcpSkills(config.mcp, logger);
+    for (const { skill } of mcpSkills) {
+      try {
+        skillRegistry.register(skill);
+      } catch (err) {
+        logger.error({ skill: skill.name, error: err }, "Failed to register MCP skill");
+      }
+    }
+  }
+
   // 6b. Register subagent skill (tools registered now, manager wired after orchestrator)
   const subagentSkill = new SubagentSkill();
   skillRegistry.register(subagentSkill);
@@ -364,6 +382,22 @@ async function main() {
   // 9b. Start SubagentManager
   subagentManager.startup();
 
+  // 9c. Start periodic cleanup for confirmation tokens
+  const CONFIRMATION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  const confirmationCleanupInterval = setInterval(async () => {
+    try {
+      await confirmationManager.cleanup();
+      logger.debug("Confirmation token cleanup completed");
+    } catch (err) {
+      logger.error({ error: err }, "Failed to cleanup confirmation tokens");
+    }
+  }, CONFIRMATION_CLEANUP_INTERVAL_MS);
+
+  logger.info(
+    { intervalMinutes: CONFIRMATION_CLEANUP_INTERVAL_MS / 60000 },
+    "Confirmation cleanup interval started"
+  );
+
   // 10. Start Discord bot
   const discordBot = new DiscordBot(
     {
@@ -439,6 +473,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal");
     doctorService.stop();
+    clearInterval(confirmationCleanupInterval);
     await subagentManager.shutdown();
     await discordBot.stop();
     if (slackBot) await slackBot.stop();

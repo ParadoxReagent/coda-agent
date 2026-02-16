@@ -15,6 +15,7 @@ coda is a personal AI assistant that lives in Discord and manages your digital l
 - **Reminders** — Natural language time parsing ("in 2 hours", "every Monday at 9am"), background due-reminder alerts, snooze
 - **Notes** — Full-text search, tagging, `context:always` notes injected into every conversation
 - **Memory** — Semantic vector search (pgvector + sentence-transformers), auto-injected context, LLM-driven save/search
+- **MCP Integration** — Connect to Model Context Protocol servers (stdio + HTTP transports), use external tools from filesystem, GitHub, databases, etc.
 - **Morning Briefing** — Say "good morning" and get a summary of pending reminders, notes, and n8n events in one response
 - **Redis Streams Event Bus** — Durable at-least-once event delivery with consumer groups, idempotency, and dead letter queue
 - **Alert Router** — Configurable routing rules, quiet hours, per-event cooldowns, severity levels, and alert history audit trail
@@ -199,7 +200,7 @@ Bot: Found 1 note: "The WiFi password for the office is sunshine42"
 
 coda has three types of capabilities: **integrations** (external service connectors), **built-in skills** (agent abilities), and **agent skills** (community/custom instruction-based skills).
 
-- **[Integrations](integrations_readme.md)** — n8n, Firecrawl (web scraping/search)
+- **[Integrations](integrations_readme.md)** — MCP (Model Context Protocol), n8n, Firecrawl (web scraping/search)
 - **[Skills](skills_readme.md)** — Reminders, Notes, Memory, Scheduler, Agent Skills (community/custom)
 
 ### Morning Briefing

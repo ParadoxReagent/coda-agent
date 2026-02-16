@@ -15,6 +15,7 @@ import type { InboundAttachment, OutboundFile, OrchestratorResponse } from "./ty
 import { ResilientExecutor } from "./resilient-executor.js";
 import { withContext, createCorrelationId } from "./correlation.js";
 import { ContentSanitizer } from "./sanitizer.js";
+import { TempDirManager } from "./temp-dir.js";
 
 const MAX_TOOL_CALLS_PER_TURN = 10;
 const MAX_TOOL_CALLS_PER_SESSION = 50;
@@ -138,10 +139,11 @@ export class Orchestrator {
           : undefined;
       const system = await this.buildSystemPrompt(userId, message, tools);
 
-      // Append working directory only if code_execute is available
+      // Append working directory if code_execute or mcp_pdf tools are available
       const hasCodeExecute = tools?.some(t => t.name === "code_execute");
-      if (workingDir && hasCodeExecute) {
-        augmentedMessage += `\n\n[Working directory for code execution: ${workingDir}]`;
+      const hasPdfTools = tools?.some(t => t.name.startsWith("mcp_pdf_"));
+      if (workingDir && (hasCodeExecute || hasPdfTools)) {
+        augmentedMessage += `\n\n[Working directory: ${workingDir}. Write output files to ${workingDir}/output/]`;
       }
 
       // 4. Build messages
@@ -170,6 +172,7 @@ export class Orchestrator {
       // 7. Tool use loop
       let toolCallCount = 0;
       const outputFiles: OutboundFile[] = [];
+      let pendingConfirmation = false;
 
       while (response.stopReason === "tool_use") {
         toolCallCount += response.toolCalls.length;
@@ -205,10 +208,16 @@ export class Orchestrator {
         this.context.checkSessionToolCalls(userId, channel, true, MAX_TOOL_CALLS_PER_SESSION);
 
         // Execute tool calls
-        const toolResults = await this.executeTools(
+        const { results: toolResults, hasConfirmation } = await this.executeTools(
           userId,
-          response.toolCalls
+          response.toolCalls,
+          workingDir
         );
+
+        // Track if any confirmation was created
+        if (hasConfirmation) {
+          pendingConfirmation = true;
+        }
 
         // Collect output files from tool results
         for (const tr of toolResults) {
@@ -354,6 +363,9 @@ export class Orchestrator {
       if (outputFiles.length > 0) {
         orchestratorResponse.files = outputFiles;
       }
+      if (pendingConfirmation) {
+        orchestratorResponse.pendingConfirmation = true;
+      }
       return orchestratorResponse;
     } catch (err) {
       this.logger.error(
@@ -426,14 +438,32 @@ export class Orchestrator {
       return {
         text: `Failed to execute the confirmed action: ${err instanceof Error ? err.message : "Unknown error"}`,
       };
+    } finally {
+      // Clean up temp directory after confirmation execution (success or failure)
+      if (action.tempDir) {
+        try {
+          await TempDirManager.cleanup(action.tempDir);
+          this.logger.debug(
+            { tempDir: action.tempDir },
+            "Cleaned up temp directory after confirmation"
+          );
+        } catch (err) {
+          this.logger.warn(
+            { tempDir: action.tempDir, error: err },
+            "Failed to clean up temp directory after confirmation"
+          );
+        }
+      }
     }
   }
 
   private async executeTools(
     userId: string,
-    toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>
-  ): Promise<Array<{ toolCallId: string; result: string }>> {
+    toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
+    workingDir?: string
+  ): Promise<{ results: Array<{ toolCallId: string; result: string }>; hasConfirmation: boolean }> {
     const results: Array<{ toolCallId: string; result: string }> = [];
+    let hasConfirmation = false;
 
     for (const tc of toolCalls) {
       try {
@@ -455,8 +485,11 @@ export class Orchestrator {
             this.skills.getSkillForTool(tc.name)?.name ?? "unknown",
             tc.name,
             tc.input,
-            description
+            description,
+            workingDir
           );
+
+          hasConfirmation = true;
 
           results.push({
             toolCallId: tc.id,
@@ -491,7 +524,7 @@ export class Orchestrator {
       }
     }
 
-    return results;
+    return { results, hasConfirmation };
   }
 
   /**

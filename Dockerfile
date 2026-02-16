@@ -19,6 +19,9 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 # Install Docker CLI and su-exec for socket permission handling
 RUN apk add --no-cache docker-cli su-exec
 
+# Install Python 3 and pip for MCP PDF server
+RUN apk add --no-cache python3 py3-pip
+
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
@@ -27,6 +30,11 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist ./dist
 COPY src/db/migrations ./db/migrations
 COPY src/skills/agent-skills/ ./dist/skills/agent-skills/
+
+# Copy MCP server files and install Python dependencies
+COPY src/integrations/mcp/servers/ ./src/integrations/mcp/servers/
+RUN pip3 install --no-cache-dir --break-system-packages \
+  -r src/integrations/mcp/servers/pdf/requirements.txt
 
 ENV NODE_ENV=production
 EXPOSE 3000

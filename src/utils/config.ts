@@ -238,6 +238,39 @@ const ExecutionConfigSchema = z.object({
   ]),
 });
 
+const McpTransportSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("stdio"),
+    command: z.string(),
+    args: z.array(z.string()).default([]),
+    env: z.record(z.string()).optional(),
+    cwd: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("http"),
+    url: z.string().url(),
+    headers: z.record(z.string()).optional(),
+  }),
+]);
+
+const McpServerConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  transport: McpTransportSchema,
+  timeout_ms: z.number().default(30000),
+  tool_timeout_ms: z.number().default(60000),
+  tool_allowlist: z.array(z.string()).optional(),
+  tool_blocklist: z.array(z.string()).default([]),
+  requires_confirmation: z.array(z.string()).default([]),
+  sensitive_tools: z.array(z.string()).default([]),
+  description: z.string().optional(),
+  max_response_size: z.number().default(100000),
+  auto_refresh_tools: z.boolean().default(false),
+});
+
+const McpConfigSchema = z.object({
+  servers: z.record(McpServerConfigSchema).default({}),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -272,6 +305,7 @@ const AppConfigSchema = z.object({
   doctor: DoctorConfigSchema.optional().default({ enabled: true }),
   security: SecurityConfigSchema.optional(),
   execution: ExecutionConfigSchema.optional(),
+  mcp: McpConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -283,6 +317,9 @@ export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderCapabilitiesConfig = z.infer<typeof ProviderCapabilitiesSchema>;
 export type TierConfig = z.infer<typeof TierConfigSchema>;
 export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
+export type McpConfig = z.infer<typeof McpConfigSchema>;
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+export type McpTransport = z.infer<typeof McpTransportSchema>;
 
 /**
  * Load configuration from YAML file with environment variable overrides.

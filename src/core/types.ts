@@ -36,4 +36,6 @@ export interface OrchestratorResponse {
   text: string;
   /** Optional files to attach to response */
   files?: OutboundFile[];
+  /** Whether a confirmation is pending (temp dir should not be cleaned up yet) */
+  pendingConfirmation?: boolean;
 }

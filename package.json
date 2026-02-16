@@ -25,10 +25,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@google/genai": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@slack/bolt": "^4.6.0",
     "chrono-node": "^2.7.0",
     "croner": "^9.0.0",
     "discord.js": "^14.16.0",
+    "dotenv": "^17.3.1",
     "drizzle-orm": "^0.36.0",
     "fastify": "^5.2.0",
     "ioredis": "^5.4.0",

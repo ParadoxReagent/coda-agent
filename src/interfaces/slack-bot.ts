@@ -3,7 +3,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { Logger } from "../utils/logger.js";
-import type { InboundAttachment } from "../core/types.js";
+import type { InboundAttachment, OrchestratorResponse } from "../core/types.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
 import { TempDirManager } from "../core/temp-dir.js";
 
@@ -114,6 +114,7 @@ export class SlackBot {
       this.logger.debug({ userId, hasFiles: !!files }, "Processing Slack message");
 
       let tempDir: string | undefined;
+      let orchestratorResponse: OrchestratorResponse | undefined;
 
       try {
         // Always create temp directory and output subdirectory for code execution
@@ -190,16 +191,23 @@ export class SlackBot {
           }
         }
 
-        const response = await this.orchestrator.handleMessage(
-          userId,
-          text,
-          "slack",
-          attachments,
-          tempDir
-        );
+        try {
+          orchestratorResponse = await this.orchestrator.handleMessage(
+            userId,
+            text,
+            "slack",
+            attachments,
+            tempDir
+          );
+        } catch (err) {
+          // If orchestrator throws, we still want to preserve temp dir if it has attachments
+          // (in case a confirmation was created before the error)
+          this.logger.error({ error: err }, "Orchestrator threw error");
+          throw err;
+        }
 
         // Sanitize output to prevent channel-wide mentions
-        const sanitized = ContentSanitizer.sanitizeForSlack(response.text);
+        const sanitized = ContentSanitizer.sanitizeForSlack(orchestratorResponse.text);
 
         // Reply in thread if this was in a thread, otherwise start a new thread
         const replyThread = threadTs ?? ts;
@@ -213,8 +221,8 @@ export class SlackBot {
         }
 
         // Upload response files if present
-        if (response.files && response.files.length > 0 && channel) {
-          for (const file of response.files) {
+        if (orchestratorResponse.files && orchestratorResponse.files.length > 0 && channel) {
+          for (const file of orchestratorResponse.files) {
             try {
               const uploadParams: any = {
                 channel_id: channel,
@@ -265,9 +273,23 @@ export class SlackBot {
           thread_ts: threadTs ?? ts,
         });
       } finally {
-        // Clean up temp directory
+        // Clean up temp directory only if:
+        // 1. No confirmation is pending, AND
+        // 2. We have a response (if no response, keep temp dir in case confirmation was created)
         if (tempDir) {
-          await TempDirManager.cleanup(tempDir);
+          const shouldCleanup = orchestratorResponse &&
+            !orchestratorResponse.pendingConfirmation;
+
+          if (shouldCleanup) {
+            await TempDirManager.cleanup(tempDir);
+          } else if (!orchestratorResponse) {
+            // No response means error occurred - log but don't cleanup yet
+            // Temp dir will be cleaned up by confirmation expiry or manual cleanup
+            this.logger.warn(
+              { tempDir },
+              "Preserving temp directory due to error (may have pending confirmation)"
+            );
+          }
         }
       }
     });

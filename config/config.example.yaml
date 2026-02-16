@@ -110,3 +110,111 @@ weather: {}         # Free NWS API, no key needed
 #     enabled: false
 #     start: "22:00"
 #     end: "07:00"
+
+# MCP (Model Context Protocol) Integration
+# Connect to external MCP servers and use their tools as coda skills
+# See docs/mcp-integration.md for complete documentation
+#
+# mcp:
+#   servers:
+#     # Example 1: PDF processing (Python MCP server)
+#     # Built-in server for PDF operations (merge, split, extract, rotate)
+#     pdf:
+#       enabled: true
+#       transport:
+#         type: stdio
+#         command: python3
+#         args: ["src/integrations/mcp/servers/pdf/server.py"]
+#       description: "PDF processing tools (merge, split, extract text/tables, rotate)"
+#       tool_timeout_ms: 120000  # 2 minutes for large PDFs
+#       max_response_size: 500000  # 500KB for extracted text/tables
+#
+#     # Example 2: Local filesystem access via stdio
+#     # Runs an MCP server as a child process
+#     filesystem:
+#       enabled: true
+#       transport:
+#         type: stdio
+#         command: npx
+#         args: ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/directory"]
+#         env:  # Optional environment variables
+#           DEBUG: "mcp:*"
+#         cwd: /working/directory  # Optional working directory
+#       tool_blocklist: ["write_file", "delete_file"]  # Block dangerous operations
+#       description: "Read-only filesystem access"
+#       timeout_ms: 30000        # Connection timeout
+#       tool_timeout_ms: 60000   # Per-tool execution timeout
+#       max_response_size: 100000  # Max response size in bytes (100KB)
+#
+#     # Example 3: Remote MCP service via HTTP
+#     # For production deployments, microservices, or external APIs
+#     github:
+#       enabled: false
+#       transport:
+#         type: http
+#         url: https://mcp-github.example.com  # Remote URL
+#         # Or use environment variables (recommended for secrets):
+#         # url: ${MCP_GITHUB_URL}
+#         headers:
+#           Authorization: "Bearer ${GITHUB_TOKEN}"  # From env: GITHUB_TOKEN
+#           X-Custom-Header: "value"
+#       requires_confirmation: ["create_issue", "create_pull_request"]
+#       sensitive_tools: ["get_token"]  # Logged at info level
+#       timeout_ms: 60000
+#
+#     # Example 4: Docker container (same network)
+#     # When both coda-agent and MCP server are in Docker
+#     docker_service:
+#       enabled: false
+#       transport:
+#         type: http
+#         url: http://mcp-filesystem-container:8080  # Container name
+#         # Or Docker Compose service name:
+#         # url: http://mcp-service:8080
+#       description: "Containerized MCP filesystem"
+#
+#     # Example 5: Host machine (when coda-agent is in Docker)
+#     host_service:
+#       enabled: false
+#       transport:
+#         type: http
+#         # Mac/Windows:
+#         url: http://host.docker.internal:8080
+#         # Linux (requires --add-host=host-gateway:host-gateway):
+#         # url: http://host-gateway:8080
+#
+#     # Example 6: Tool allowlist (strict mode)
+#     # Only specified tools are available
+#     database:
+#       enabled: false
+#       transport:
+#         type: http
+#         url: ${MCP_DATABASE_URL}
+#       tool_allowlist:  # Allowlist takes precedence over blocklist
+#         - query_read_only
+#         - list_tables
+#         - get_schema
+#       # tool_blocklist is ignored when tool_allowlist is set
+#       requires_confirmation: ["execute_migration"]
+#       sensitive_tools: ["query_read_only"]
+#
+# Environment Variable Substitution:
+# All string values support ${VAR_NAME} syntax for secrets.
+#
+# Method 1: .env file (recommended for local development)
+#   Add to .env in project root:
+#     MCP_GITHUB_URL=https://mcp-github.example.com
+#     GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+#     MCP_DATABASE_URL=http://mcp-db:8080
+#
+# Method 2: Export directly (useful for Docker/CI)
+#   export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
+#   export MCP_GITHUB_URL="https://mcp-github.example.com"
+#
+# Security Notes:
+# - Always use HTTPS for remote URLs (except localhost/internal networks)
+# - Use environment variables for secrets (never commit tokens)
+# - Set tool_blocklist to prevent dangerous operations
+# - Mark sensitive tools with sensitive_tools
+# - Use requires_confirmation for destructive actions
+# - Set appropriate max_response_size to prevent memory issues
