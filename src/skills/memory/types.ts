@@ -1,6 +1,6 @@
 export interface MemoryIngestRequest {
   content: string;
-  content_type: "conversation" | "fact" | "preference" | "event" | "note";
+  content_type: "conversation" | "fact" | "preference" | "event" | "note" | "summary";
   tags?: string[];
   importance?: number;
   source_type?: string;

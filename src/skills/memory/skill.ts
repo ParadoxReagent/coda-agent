@@ -18,6 +18,8 @@ export class MemorySkill implements Skill {
   private redis!: { get: (k: string) => Promise<string | null>; set: (k: string, v: string, ttl?: number) => Promise<void>; del: (k: string) => Promise<void> };
   private contextInjectionEnabled = true;
   private contextMaxTokens = 1500;
+  private llm?: { chat: (params: { system: string; messages: Array<{ role: "user" | "assistant"; content: string }>; maxTokens?: number }) => Promise<{ text: string | null }> };
+  private conversations?: { getAllHistories: () => Map<string, Array<{ role: string; content: string; channel: string; timestamp: number }>> };
 
   getTools(): SkillToolDefinition[] {
     return [
@@ -34,7 +36,7 @@ export class MemorySkill implements Skill {
             },
             content_type: {
               type: "string",
-              enum: ["conversation", "fact", "preference", "event", "note"],
+              enum: ["conversation", "fact", "preference", "event", "note", "summary"],
               description: "Category of memory",
             },
             tags: {
@@ -178,6 +180,8 @@ export class MemorySkill implements Skill {
     this.logger = ctx.logger;
     this.redis = ctx.redis;
     this.eventBus = ctx.eventBus;
+    this.llm = ctx.llm;
+    this.conversations = ctx.conversations;
 
     const config = ctx.config as unknown as MemoryConfig;
     this.client = new MemoryClient({
@@ -190,11 +194,47 @@ export class MemorySkill implements Skill {
       this.contextMaxTokens = config.context_injection.max_tokens ?? 1500;
     }
 
+    // Register daily summarization cron job
+    if (ctx.scheduler && this.llm && this.conversations) {
+      ctx.scheduler.registerTask({
+        name: "daily_summarize",
+        cronExpression: "0 23 * * *", // 11 PM daily
+        handler: () => this.runDailySummarization(),
+        description: "Generate daily conversation summaries and extract facts",
+      });
+      this.logger.info("Daily summarization cron job registered (11 PM daily)");
+    } else if (!this.llm || !this.conversations) {
+      this.logger.debug("Daily summarization disabled (missing llm or conversations context)");
+    }
+
     this.logger.info("Memory skill started");
   }
 
   async shutdown(): Promise<void> {
     this.logger.info("Memory skill stopped");
+  }
+
+  /**
+   * Public method for auto-ingesting conversation turns.
+   * Fire-and-forget: logs errors but doesn't throw.
+   */
+  async autoIngest(
+    content: string,
+    userId?: string,
+    tags?: string[]
+  ): Promise<void> {
+    try {
+      await this.client.ingest({
+        content,
+        content_type: "conversation",
+        tags: [...(tags ?? []), "auto-ingested"],
+        importance: 0.3,
+        user_id: userId,
+      });
+      this.logger.debug({ userId, contentLength: content.length }, "Auto-ingested conversation");
+    } catch (err) {
+      this.logger.error({ error: err, userId }, "Failed to auto-ingest conversation");
+    }
   }
 
   /**
@@ -245,9 +285,10 @@ export class MemorySkill implements Skill {
   private async save(input: Record<string, unknown>): Promise<string> {
     const result = await this.client.ingest({
       content: input.content as string,
-      content_type: input.content_type as "fact" | "preference" | "conversation" | "event" | "note",
+      content_type: input.content_type as "fact" | "preference" | "conversation" | "event" | "note" | "summary",
       tags: (input.tags as string[]) ?? [],
       importance: (input.importance as number) ?? 0.5,
+      user_id: input.user_id as string | undefined,
     });
 
     this.logger.info(
@@ -276,6 +317,7 @@ export class MemorySkill implements Skill {
       content_types: input.content_types as string[] | undefined,
       tags: input.tags as string[] | undefined,
       limit: (input.limit as number) ?? 10,
+      user_id: input.user_id as string | undefined,
     });
 
     await this.eventBus.publish({
@@ -313,6 +355,7 @@ export class MemorySkill implements Skill {
     const response = await this.client.context({
       query: input.query as string,
       max_tokens: (input.max_tokens as number) ?? 1500,
+      user_id: input.user_id as string | undefined,
     });
 
     return JSON.stringify({
@@ -327,6 +370,7 @@ export class MemorySkill implements Skill {
       content_type: input.content_type as string | undefined,
       tag: input.tag as string | undefined,
       limit: (input.limit as number) ?? 20,
+      user_id: input.user_id as string | undefined,
     });
 
     if (response.count === 0) {
@@ -368,5 +412,181 @@ export class MemorySkill implements Skill {
       success: result.success,
       message: result.message,
     });
+  }
+
+  /**
+   * Daily summarization: generates narrative summaries and extracts facts from today's conversations.
+   * Runs at 11 PM daily via cron job.
+   */
+  private async runDailySummarization(): Promise<void> {
+    if (!this.llm || !this.conversations) {
+      this.logger.warn("Cannot run daily summarization: missing llm or conversations context");
+      return;
+    }
+
+    this.logger.info("Starting daily summarization");
+
+    try {
+      const allHistories = this.conversations.getAllHistories();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayTimestamp = today.getTime();
+      const dateStr = today.toISOString().slice(0, 10);
+
+      let processedUsers = 0;
+      let totalSummaries = 0;
+
+      for (const [userId, messages] of allHistories.entries()) {
+        // Filter to today's messages
+        const todayMessages = messages.filter((m) => m.timestamp >= todayTimestamp);
+
+        // Skip if less than 3 messages today
+        if (todayMessages.length < 3) {
+          this.logger.debug({ userId, messageCount: todayMessages.length }, "Skipping user (insufficient messages)");
+          continue;
+        }
+
+        processedUsers++;
+
+        // Build conversation text for LLM
+        const conversationText = todayMessages
+          .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+          .join("\n\n");
+
+        // Call LLM to generate summary and extract facts
+        const prompt = `You are analyzing a day's worth of conversations to create a memory summary.
+
+Today's date: ${dateStr}
+
+Conversation:
+${conversationText}
+
+Generate two things:
+
+1. SUMMARY: Write a 2-3 sentence narrative summary starting with "On ${dateStr}, ..." that captures the main topics and activities.
+
+2. FACTS: Extract key facts, preferences, or decisions as a JSON array. Each fact should have:
+   - content: the fact text
+   - content_type: "fact", "preference", or "event"
+   - importance: 0.0-1.0
+   - tags: array of relevant tags
+
+Format your response exactly as:
+SUMMARY:
+[your summary here]
+
+FACTS:
+[your JSON array here]
+
+If no facts to extract, return an empty array for FACTS.`;
+
+        try {
+          const response = await this.llm.chat({
+            system: "You are a memory summarization assistant. Extract key information from conversations.",
+            messages: [{ role: "user", content: prompt }],
+            maxTokens: 2000,
+          });
+
+          if (!response.text) {
+            this.logger.warn({ userId }, "LLM returned no text for summarization");
+            continue;
+          }
+
+          // Parse the response
+          const { summary, facts } = this.parseSummarizationResult(response.text);
+
+          // Ingest summary
+          if (summary) {
+            await this.client.ingest({
+              content: summary,
+              content_type: "summary",
+              tags: ["daily-summary", dateStr],
+              importance: 0.7,
+              user_id: userId,
+            });
+            totalSummaries++;
+            this.logger.debug({ userId, summaryLength: summary.length }, "Summary ingested");
+          }
+
+          // Ingest extracted facts
+          for (const fact of facts) {
+            await this.client.ingest({
+              content: fact.content,
+              content_type: fact.content_type as "fact" | "preference" | "event",
+              tags: [...(fact.tags ?? []), "extracted-from-summary", dateStr],
+              importance: fact.importance ?? 0.5,
+              user_id: userId,
+            });
+          }
+
+          if (facts.length > 0) {
+            this.logger.debug({ userId, factCount: facts.length }, "Facts extracted and ingested");
+          }
+        } catch (err) {
+          this.logger.error({ error: err, userId }, "Failed to summarize conversation for user");
+        }
+      }
+
+      this.logger.info(
+        { processedUsers, totalSummaries },
+        "Daily summarization completed"
+      );
+
+      await this.eventBus.publish({
+        eventType: "memory.daily_summary",
+        timestamp: new Date().toISOString(),
+        sourceSkill: this.name,
+        payload: { processedUsers, totalSummaries, date: dateStr },
+        severity: "low",
+      });
+    } catch (err) {
+      this.logger.error({ error: err }, "Daily summarization failed");
+    }
+  }
+
+  /**
+   * Parse LLM summarization result into summary text and facts array.
+   * Handles malformed output gracefully.
+   */
+  private parseSummarizationResult(text: string): {
+    summary: string | null;
+    facts: Array<{ content: string; content_type: string; importance: number; tags: string[] }>;
+  } {
+    let summary: string | null = null;
+    let facts: Array<{ content: string; content_type: string; importance: number; tags: string[] }> = [];
+
+    try {
+      // Split on markers
+      const summaryMatch = text.match(/SUMMARY:\s*\n([\s\S]*?)(?=\nFACTS:|\n*$)/i);
+      const factsMatch = text.match(/FACTS:\s*\n([\s\S]*?)$/i);
+
+      if (summaryMatch && summaryMatch[1]) {
+        summary = summaryMatch[1].trim();
+      }
+
+      if (factsMatch && factsMatch[1]) {
+        const factsText = factsMatch[1].trim();
+        // Try to parse as JSON
+        try {
+          const parsed = JSON.parse(factsText);
+          if (Array.isArray(parsed)) {
+            facts = parsed.filter(
+              (f) =>
+                typeof f === "object" &&
+                f !== null &&
+                typeof f.content === "string" &&
+                f.content.length > 0
+            );
+          }
+        } catch {
+          // Not valid JSON, ignore
+          this.logger.debug("Failed to parse FACTS as JSON, skipping");
+        }
+      }
+    } catch (err) {
+      this.logger.warn({ error: err }, "Error parsing summarization result");
+    }
+
+    return { summary, facts };
   }
 }

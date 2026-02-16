@@ -2,7 +2,7 @@ import type { LLMMessage } from "./llm/provider.js";
 import type { Logger } from "../utils/logger.js";
 import { RETENTION } from "../utils/retention.js";
 
-interface StoredMessage {
+export interface StoredMessage {
   role: "user" | "assistant";
   content: string;
   channel: string;
@@ -53,6 +53,106 @@ export class ContextStore {
       role: m.role,
       content: m.content,
     }));
+  }
+
+  /** Get all conversation histories (for daily summarization). Returns a shallow copy. */
+  getAllHistories(): Map<string, StoredMessage[]> {
+    return new Map(this.history);
+  }
+
+  /**
+   * Check if conversation history needs compaction.
+   * Triggers when:
+   * - Message count >= 30 (secondary trigger)
+   * - OR estimated tokens (chars / 4) >= 80% of 8000 token budget (primary trigger)
+   */
+  needsCompaction(userId: string, channel?: string): boolean {
+    const messages = this.history.get(userId) ?? [];
+    const filtered = channel
+      ? messages.filter((m) => m.channel === channel)
+      : messages;
+
+    // Check message count
+    if (filtered.length >= 30) {
+      return true;
+    }
+
+    // Check token estimate (80% of 8000 = 6400 tokens)
+    const totalChars = filtered.reduce((sum, m) => sum + m.content.length, 0);
+    const estimatedTokens = totalChars / 4;
+    return estimatedTokens >= 6400;
+  }
+
+  /**
+   * Compact conversation history by summarizing older messages.
+   * Keeps the most recent messages and replaces older ones with a summary.
+   * @param userId User identifier
+   * @param channel Channel identifier (optional)
+   * @param summarizer Function that takes messages and returns a summary
+   * @param keepRecent Number of recent messages to keep unchanged (default 10)
+   */
+  async compactHistory(
+    userId: string,
+    channel: string | undefined,
+    summarizer: (messages: string[]) => Promise<string>,
+    keepRecent = 10
+  ): Promise<void> {
+    const messages = this.history.get(userId) ?? [];
+    const filtered = channel
+      ? messages.filter((m) => m.channel === channel)
+      : messages;
+
+    if (filtered.length <= keepRecent) {
+      // Nothing to compact
+      return;
+    }
+
+    try {
+      // Split into older (to compact) and recent (to keep)
+      const olderMessages = filtered.slice(0, -keepRecent);
+      const recentMessages = filtered.slice(-keepRecent);
+
+      // Format older messages for summarization
+      const formattedOlder = olderMessages.map(
+        (m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
+      );
+
+      // Get summary
+      const summary = await summarizer(formattedOlder);
+
+      // Create synthetic summary message
+      const summaryMessage: StoredMessage = {
+        role: "assistant",
+        content: `[Summary of earlier conversation]\n${summary}`,
+        channel: channel ?? "default",
+        timestamp: olderMessages[0]?.timestamp ?? Date.now(),
+      };
+
+      // Reconstruct history: all non-target-channel messages + summary + recent
+      const otherChannelMessages = messages.filter(
+        (m) => channel && m.channel !== channel
+      );
+      const newHistory = [...otherChannelMessages, summaryMessage, ...recentMessages];
+
+      this.history.set(userId, newHistory);
+
+      this.logger.info(
+        {
+          userId,
+          channel,
+          originalCount: filtered.length,
+          compactedCount: recentMessages.length + 1,
+          keptRecent: keepRecent,
+        },
+        "Conversation history compacted"
+      );
+    } catch (err) {
+      this.logger.error(
+        { error: err, userId, channel },
+        "Failed to compact conversation history"
+      );
+      throw err;
+    }
   }
 
   /** Save a message exchange to conversation history. */

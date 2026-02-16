@@ -96,7 +96,45 @@ export class Orchestrator {
       }
 
       // 1. Load conversation context
-      const history = await this.context.getHistory(userId, channel);
+      let history = await this.context.getHistory(userId, channel);
+
+      // 1b. Check if compaction is needed
+      if (this.context.needsCompaction(userId, channel)) {
+        try {
+          this.logger.info({ userId, channel }, "Compacting conversation history");
+
+          // Create summarizer using light tier LLM
+          const summarizer = async (messages: string[]): Promise<string> => {
+            const { provider, model } = await this.providerManager.getForUserTiered(
+              userId,
+              "light"
+            );
+            const conversationText = messages.join("\n\n");
+            const response = await provider.chat({
+              model,
+              system: "You are a conversation summarizer. Create a concise summary of the conversation history.",
+              messages: [
+                {
+                  role: "user",
+                  content: `Summarize this conversation in 2-3 sentences:\n\n${conversationText}`,
+                },
+              ],
+              maxTokens: 500,
+            });
+            return response.text ?? "Earlier conversation context.";
+          };
+
+          await this.context.compactHistory(userId, channel, summarizer, 10);
+
+          // Re-load history after compaction
+          history = await this.context.getHistory(userId, channel);
+        } catch (err) {
+          this.logger.warn(
+            { error: err, userId, channel },
+            "Failed to compact history, continuing with full history"
+          );
+        }
+      }
 
       // 2. Classify message and get tier-appropriate provider + model
       let currentTier: "light" | "heavy" | undefined;
@@ -359,6 +397,14 @@ export class Orchestrator {
         text: finalText,
       });
 
+      // Auto-ingest conversation turn (fire-and-forget)
+      const memorySkill = this.skills.getSkillByName("memory") as MemorySkill | undefined;
+      if (memorySkill?.autoIngest && message.length >= 50 && !message.startsWith("/")) {
+        memorySkill.autoIngest(message, userId).catch((err) => {
+          this.logger.debug({ error: err }, "Auto-ingest failed (non-critical)");
+        });
+      }
+
       const orchestratorResponse: OrchestratorResponse = { text: finalText };
       if (outputFiles.length > 0) {
         orchestratorResponse.files = outputFiles;
@@ -608,6 +654,16 @@ export class Orchestrator {
       }
     }
 
+    // Memory instructions (if memory tools are available)
+    const hasMemoryTools = tools?.some(t => t.name.startsWith("memory_"));
+    const memoryInstructions = hasMemoryTools
+      ? `\n\nMemory:
+- PROACTIVELY save important info using memory_save (names → fact/0.9, preferences → preference/0.7, decisions → fact/0.6)
+- When user shares personal info, call memory_save IMMEDIATELY before responding
+- Relevant memories are auto-loaded — use them to personalize responses
+- For "do you remember" questions, use memory_search`
+      : "";
+
     return `You are coda, a personal AI assistant. You help your user manage their digital life.
 
 ${capabilitiesSection}
@@ -639,7 +695,7 @@ Morning Briefing:
 When the user says "morning", "briefing", "good morning", or "/briefing":
 1. Call reminder_list for pending reminders (if available)
 2. Query n8n events for recent activity (if available)
-Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${this.buildAgentSkillsSection()}${notesSection}${memorySection}`;
+Compose a natural, friendly briefing from all available results. If some skills are not available, include what you can.${this.buildAgentSkillsSection()}${notesSection}${memorySection}${memoryInstructions}`;
   }
 
   private buildCodeExecutionSection(tools?: LLMToolDefinition[]): string {

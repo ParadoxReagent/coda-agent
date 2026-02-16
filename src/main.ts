@@ -379,6 +379,31 @@ async function main() {
       eventBus,
       db,
       scheduler: taskScheduler.getClientFor(skillName),
+      llm: {
+        async chat(params) {
+          const { provider, model } = await providerManager.getForUserTiered("system", "light");
+          const response = await provider.chat({
+            model,
+            system: params.system,
+            messages: params.messages.map((m) => ({ role: m.role, content: m.content })),
+            maxTokens: params.maxTokens ?? 4096,
+          });
+          return { text: response.text };
+        },
+      },
+      conversations: {
+        async getHistory(userId: string) {
+          const history = await contextStore.getHistory(userId);
+          return history.map((m) => ({
+            role: m.role,
+            content: typeof m.content === "string" ? m.content : "",
+            timestamp: Date.now(), // Approximate, as we don't store timestamps in LLMMessage
+          }));
+        },
+        getAllHistories() {
+          return contextStore.getAllHistories();
+        },
+      },
     };
   });
 

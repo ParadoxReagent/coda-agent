@@ -36,12 +36,14 @@ export class MemoryClient {
     tag?: string;
     limit?: number;
     offset?: number;
+    user_id?: string;
   }): Promise<MemoryListResponse> {
     const searchParams = new URLSearchParams();
     if (params?.content_type) searchParams.set("content_type", params.content_type);
     if (params?.tag) searchParams.set("tag", params.tag);
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));
+    if (params?.user_id) searchParams.set("user_id", params.user_id);
     const qs = searchParams.toString();
     return this.get(`/memories${qs ? `?${qs}` : ""}`, 5_000);
   }

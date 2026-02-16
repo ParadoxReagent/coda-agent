@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class IngestRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=5000)
-    content_type: str = Field(..., pattern=r"^(conversation|fact|preference|event|note)$")
+    content: str = Field(..., min_length=1, max_length=10000)
+    content_type: str = Field(..., pattern=r"^(conversation|fact|preference|event|note|summary)$")
     tags: list[str] = Field(default_factory=list, max_length=20)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     source_type: str = Field(default="manual", max_length=50)

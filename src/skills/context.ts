@@ -55,4 +55,19 @@ export interface SkillContext {
 
   /** Optional scheduler client for registering cron-based tasks. */
   scheduler?: TaskSchedulerClient;
+
+  /** Optional LLM access for skills that need to call the LLM directly. */
+  llm?: {
+    chat(params: {
+      system: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+      maxTokens?: number;
+    }): Promise<{ text: string | null }>;
+  };
+
+  /** Optional conversation history access for summarization and analysis. */
+  conversations?: {
+    getHistory(userId: string): Promise<Array<{ role: string; content: string; timestamp: number }>>;
+    getAllHistories(): Map<string, Array<{ role: string; content: string; channel: string; timestamp: number }>>;
+  };
 }
