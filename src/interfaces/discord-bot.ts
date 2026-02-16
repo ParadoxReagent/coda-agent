@@ -20,6 +20,7 @@ import type { SubagentManager } from "../core/subagent-manager.js";
 import type { InboundAttachment, OrchestratorResponse } from "../core/types.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
 import { TempDirManager } from "../core/temp-dir.js";
+import type { McpServerManager } from "../integrations/mcp/manager.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -46,6 +47,7 @@ export class DiscordBot {
   private allowedUserIds: Set<string>;
   private preferences?: PreferencesManager;
   private subagentManager?: SubagentManager;
+  private mcpManager?: McpServerManager;
 
   constructor(
     config: DiscordBotConfig,
@@ -54,7 +56,8 @@ export class DiscordBot {
     skills: SkillRegistry,
     logger: Logger,
     preferences?: PreferencesManager,
-    subagentManager?: SubagentManager
+    subagentManager?: SubagentManager,
+    mcpManager?: McpServerManager
   ) {
     this.config = config;
     this.orchestrator = orchestrator;
@@ -64,6 +67,7 @@ export class DiscordBot {
     this.allowedUserIds = new Set(config.allowedUserIds);
     this.preferences = preferences;
     this.subagentManager = subagentManager;
+    this.mcpManager = mcpManager;
 
     this.client = new Client({
       intents: [
@@ -367,6 +371,30 @@ export class DiscordBot {
         }
         const subcommand = interaction.options.getSubcommand();
         await this.handleSubagentsCommand(interaction, subcommand);
+        break;
+      }
+
+      case "mcp": {
+        if (!this.mcpManager) {
+          await interaction.reply("No MCP servers configured.");
+          break;
+        }
+        const statuses = this.mcpManager.getStatus();
+        if (statuses.length === 0) {
+          await interaction.reply("No MCP servers registered.");
+          break;
+        }
+
+        const lines = statuses.map((s) => {
+          const status = s.connected ? "🟢 Connected" : "⚪ Disconnected";
+          const transport = s.transportDetail;
+          const tools = s.connected ? `${s.toolCount} tools` : "—";
+          const idle =
+            s.connected && s.idleMinutes !== null ? `idle ${s.idleMinutes}m` : "";
+          return `**${s.name}** ${status}\n  ${transport} | ${tools} ${idle}\n  ${s.description}`;
+        });
+
+        await interaction.reply(`**MCP Servers**\n\n${lines.join("\n\n")}`);
         break;
       }
     }
@@ -796,6 +824,10 @@ export class DiscordBot {
                 .setRequired(true)
             )
         ),
+
+      new SlashCommandBuilder()
+        .setName("mcp")
+        .setDescription("Show MCP server status"),
     ];
 
     const rest = new REST().setToken(this.config.botToken);

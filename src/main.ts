@@ -28,6 +28,7 @@ import { initializeDatabase } from "./db/connection.js";
 import { runMigrations } from "./db/migrate.js";
 import { NotesSkill } from "./skills/notes/skill.js";
 import { ReminderSkill } from "./skills/reminders/skill.js";
+import type { McpServerManager } from "./integrations/mcp/manager.js";
 import { SchedulerSkill } from "./skills/scheduler/skill.js";
 import { N8nSkill } from "./integrations/n8n/skill.js";
 import { MemorySkill } from "./skills/memory/skill.js";
@@ -214,7 +215,7 @@ async function main() {
   }
 
   // MCP servers
-  let mcpManager: any = undefined;
+  let mcpManager: McpServerManager | undefined = undefined;
   if (config.mcp?.servers && Object.keys(config.mcp.servers).length > 0) {
     const { createMcpSkills } = await import("./integrations/mcp/factory.js");
     const { skills: mcpSkills, manager } = await createMcpSkills(config.mcp, logger);
@@ -412,7 +413,8 @@ async function main() {
     skillRegistry,
     logger,
     preferencesManager,
-    subagentManager
+    subagentManager,
+    mcpManager
   );
   await discordBot.start();
 

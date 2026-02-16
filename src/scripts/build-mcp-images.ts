@@ -8,11 +8,13 @@
  *   npm run build:mcp-images -- context7        # Build specific server
  *   npm run build:mcp-images -- --force         # Rebuild even if exists
  *   npm run build:mcp-images -- --dry-run       # Show what would be built
+ *   npm run build:mcp-images -- --list          # List discovered servers
+ *   npm run build:mcp-images -- --security-check # Check Dockerfiles for security issues
  *   npm run build:mcp-images -- context7 --force # Rebuild specific server
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../utils/logger.js";
@@ -23,6 +25,8 @@ interface BuildOptions {
   serverName?: string;
   force: boolean;
   dryRun: boolean;
+  list: boolean;
+  securityCheck: boolean;
 }
 
 function parseArgs(): BuildOptions {
@@ -30,6 +34,8 @@ function parseArgs(): BuildOptions {
   const options: BuildOptions = {
     force: false,
     dryRun: false,
+    list: false,
+    securityCheck: false,
   };
 
   for (const arg of args) {
@@ -37,6 +43,10 @@ function parseArgs(): BuildOptions {
       options.force = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--list") {
+      options.list = true;
+    } else if (arg === "--security-check") {
+      options.securityCheck = true;
     } else if (!arg.startsWith("-")) {
       options.serverName = arg;
     }
@@ -96,6 +106,46 @@ function discoverMcpServers(serversDir: string): string[] {
   return servers;
 }
 
+interface SecurityCheckResult {
+  serverName: string;
+  hasUser: boolean;
+  hasAddUser: boolean;
+  warnings: string[];
+}
+
+function checkDockerfileSecurity(serverName: string, serverDir: string): SecurityCheckResult {
+  const dockerfilePath = join(serverDir, "Dockerfile");
+  const content = readFileSync(dockerfilePath, "utf-8");
+
+  const result: SecurityCheckResult = {
+    serverName,
+    hasUser: false,
+    hasAddUser: false,
+    warnings: [],
+  };
+
+  // Check for USER directive
+  if (/^USER\s+(?!root\b)/m.test(content)) {
+    result.hasUser = true;
+  }
+
+  // Check for adduser/useradd/addgroup patterns
+  if (/(adduser|useradd|addgroup)/.test(content)) {
+    result.hasAddUser = true;
+  }
+
+  // Generate warnings
+  if (!result.hasUser) {
+    result.warnings.push("Missing USER directive (container may run as root)");
+  }
+
+  if (!result.hasAddUser && !result.hasUser) {
+    result.warnings.push("No user creation found (adduser/useradd/addgroup)");
+  }
+
+  return result;
+}
+
 async function main() {
   const options = parseArgs();
 
@@ -110,6 +160,49 @@ async function main() {
 
   if (allServers.length === 0) {
     logger.warn("No MCP servers with Dockerfiles found");
+    return;
+  }
+
+  // Handle --list flag
+  if (options.list) {
+    logger.info({ count: allServers.length, servers: allServers }, "Discovered MCP servers");
+    for (const serverName of allServers) {
+      const imageName = `coda-mcp-${serverName}`;
+      const exists = imageExists(imageName);
+      logger.info(
+        { server: serverName, image: imageName, built: exists },
+        exists ? "✓ Image exists" : "✗ Not built"
+      );
+    }
+    return;
+  }
+
+  // Handle --security-check flag
+  if (options.securityCheck) {
+    logger.info({ count: allServers.length }, "Checking Dockerfiles for security issues");
+    let passCount = 0;
+    let warnCount = 0;
+
+    for (const serverName of allServers) {
+      const serverDir = join(serversDir, serverName);
+      const result = checkDockerfileSecurity(serverName, serverDir);
+
+      if (result.warnings.length === 0) {
+        logger.info({ server: serverName }, "✓ Security check passed");
+        passCount++;
+      } else {
+        logger.warn(
+          { server: serverName, warnings: result.warnings },
+          "⚠ Security issues found"
+        );
+        warnCount++;
+      }
+    }
+
+    logger.info(
+      { passed: passCount, warnings: warnCount, total: allServers.length },
+      "Security check complete"
+    );
     return;
   }
 

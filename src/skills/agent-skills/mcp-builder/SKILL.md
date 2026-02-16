@@ -21,7 +21,7 @@ Create MCP (Model Context Protocol) servers that enable LLMs to interact with ex
 
 ## 🚀 High-Level Workflow
 
-Creating a high-quality MCP server involves four main phases:
+Creating a high-quality MCP server involves five main phases:
 
 ### Phase 1: Deep Research and Planning
 
@@ -83,6 +83,8 @@ Prioritize comprehensive API coverage. List endpoints to implement, starting wit
 ### Phase 2: Implementation
 
 #### 2.1 Set Up Project Structure
+
+**Output Location**: Place all server files in `src/integrations/mcp/servers/{name}/` for seamless coda-agent integration.
 
 See language-specific guides for project setup:
 - [⚡ TypeScript Guide](./reference/node_mcp_server.md) - Project structure, package.json, tsconfig.json
@@ -198,6 +200,69 @@ Create an XML file with this structure:
 
 ---
 
+### Phase 5: Coda-Agent Integration
+
+After creating and testing your MCP server, integrate it with coda-agent so it can be used immediately.
+
+**Load [🔌 Coda Integration Guide](./reference/coda_integration.md) for complete integration instructions.**
+
+#### 5.1 Choose Deployment Mode
+
+**Decision tree:**
+- Does the server need system libraries (ImageMagick, ffmpeg, etc.)? → Docker
+- Is it wrapping an existing npm package? → Docker
+- Is it a pure Python/Node server with only language dependencies? → Script-only
+- When in doubt → Docker (better isolation and reproducibility)
+
+See the integration guide for detailed mode selection criteria.
+
+#### 5.2 Generate Integration Artifacts
+
+**For Docker mode:**
+1. Create a hardened `Dockerfile` with non-root user
+2. Add docker-compose.yml entry with `mcp-build` profile
+3. Create config.yaml snippet with Docker transport
+
+**For Script mode:**
+1. Create config.yaml snippet with direct command transport
+
+**Important:** All Dockerfiles must include a non-root user for security:
+```dockerfile
+RUN addgroup -S mcp && adduser -S mcp -G mcp
+USER mcp
+```
+
+See the integration guide for complete Dockerfile templates (Python multi-stage, Node multi-stage, npm package wrapper).
+
+#### 5.3 Verify Integration
+
+**Build the image (Docker mode):**
+```bash
+npm run build:mcp-images -- your-server-name
+```
+
+**Verify non-root user (Docker mode):**
+```bash
+docker run --rm coda-mcp-your-server-name whoami
+# Should output: mcp
+```
+
+**Test with coda-agent:**
+1. Add config snippet to `config/config.yaml`
+2. Start coda-agent: `npm run dev`
+3. Check logs for "Registered MCP tool: ..." messages
+4. Test at least one tool via the agent CLI
+
+**Integration checklist:**
+- [ ] Server files in `src/integrations/mcp/servers/{name}/`
+- [ ] Dockerfile with non-root user (if Docker mode)
+- [ ] docker-compose.yml entry (if Docker mode)
+- [ ] config.yaml snippet added
+- [ ] All tools registered without errors
+- [ ] At least one tool tested successfully
+
+---
+
 # Reference Files
 
 ## 📚 Documentation Library
@@ -239,3 +304,14 @@ Load these resources as needed during development:
   - XML format specifications
   - Example questions and answers
   - Running an evaluation with the provided scripts
+
+### Integration Guide (Load During Phase 5)
+- [🔌 Coda Integration Guide](./reference/coda_integration.md) - Complete coda-agent integration guide with:
+  - Output location conventions
+  - Deployment mode decision tree (Docker vs script-only)
+  - Hardened Dockerfile templates (Python, Node, npm wrapper)
+  - Config.yaml snippet templates
+  - docker-compose.yml entry templates
+  - Environment variable passthrough patterns
+  - Build and verification steps
+  - Troubleshooting common issues

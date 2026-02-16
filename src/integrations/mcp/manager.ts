@@ -10,6 +10,18 @@ interface ServerState {
   tools?: Tool[]; // Discovered tools (cached after first connection)
 }
 
+export interface McpServerStatus {
+  name: string;
+  enabled: boolean;
+  connected: boolean;
+  transportType: string;       // "stdio", "http"
+  transportDetail: string;     // "docker" (if command is docker), "python3", "node", URL for http
+  toolCount: number;
+  idleMinutes: number | null;  // null if not connected
+  description: string;
+  startupMode: string;         // "eager" | "lazy"
+}
+
 /**
  * Manages MCP server lifecycle: lazy initialization, idle timeouts, graceful shutdown.
  */
@@ -55,6 +67,44 @@ export class McpServerManager {
   isConnected(serverName: string): boolean {
     const state = this.servers.get(serverName);
     return state?.client.isConnected() ?? false;
+  }
+
+  /**
+   * Get status for all registered MCP servers.
+   */
+  getStatus(): McpServerStatus[] {
+    const statuses: McpServerStatus[] = [];
+
+    for (const [serverName, state] of this.servers.entries()) {
+      const connected = state.client.isConnected();
+      const config = state.config;
+
+      // Determine transport detail
+      let transportDetail = "";
+      if (config.transport.type === "stdio") {
+        if (config.transport.command === "docker") {
+          transportDetail = "docker";
+        } else {
+          transportDetail = config.transport.command;
+        }
+      } else if (config.transport.type === "http") {
+        transportDetail = config.transport.url;
+      }
+
+      statuses.push({
+        name: serverName,
+        enabled: config.enabled ?? true,
+        connected,
+        transportType: config.transport.type,
+        transportDetail,
+        toolCount: connected && state.tools ? state.tools.length : 0,
+        idleMinutes: connected ? state.client.getIdleTimeMinutes() : null,
+        description: config.description ?? "",
+        startupMode: config.startup_mode ?? "lazy",
+      });
+    }
+
+    return statuses;
   }
 
   /**
