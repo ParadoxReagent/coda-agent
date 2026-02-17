@@ -10,3 +10,4 @@ secrets/
 config/config.yaml
 custom-skills/*/
 !custom-skills/.gitkeep
+Makefile

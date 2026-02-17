@@ -9,10 +9,12 @@ WORKDIR /app
 
 # Install Python deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
-# Pre-download the embedding model at build time
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+# Pre-download the embedding model at build time (cache the model downloads)
+RUN --mount=type=cache,target=/root/.cache/torch \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
 
 # Copy application code
 COPY src/ ./src/
