@@ -105,11 +105,65 @@ weather: {}         # Free NWS API, no key needed
 #     enabled: true
 #     quick_fix_only: true  # SECURITY: true = no LLM repair (prevents injection)
 
-# alerts:
-#   quiet_hours:
-#     enabled: false
-#     start: "22:00"
-#     end: "07:00"
+# ── Alert Routing ────────────────────────────────
+# Routes alert.* events from the event bus to Discord/Slack.
+# Without rules, alerts are silently dropped (see AlertRouter.routeAlert).
+#
+# Rule properties:
+#   severity: high | medium | low - minimum severity to route
+#   channels: ["discord", "slack"] - where to send the alert
+#   quietHours: true | false - whether quiet hours can suppress this alert
+#   cooldown: number (seconds) - per-type cooldown to prevent spam (0 = no cooldown)
+#
+alerts:
+  rules:
+    # User-facing alerts
+    "alert.reminder.due":
+      severity: medium
+      channels: ["discord"]
+      quietHours: true      # Can be suppressed during quiet hours
+      cooldown: 0           # No cooldown - each reminder fires once
+
+    # System/operational alerts
+    "alert.system.error":
+      severity: high
+      channels: ["discord"]
+      quietHours: false     # Always deliver, even during quiet hours
+      cooldown: 300         # 5 min cooldown to prevent error spam
+    "alert.system.llm_failure":
+      severity: high
+      channels: ["discord"]
+      quietHours: false
+      cooldown: 600         # 10 min cooldown - circuit breaker opened
+    "alert.system.llm_cost":
+      severity: medium
+      channels: ["discord"]
+      quietHours: true
+      cooldown: 3600        # 1 hour cooldown - daily cost threshold
+    "alert.system.task_failed":
+      severity: high
+      channels: ["discord"]
+      quietHours: false
+      cooldown: 300         # 5 min cooldown - scheduled task failed
+    "alert.system.dead_letter":
+      severity: high
+      channels: ["discord"]
+      quietHours: false
+      cooldown: 300         # 5 min cooldown - event handler failed 3x
+    "alert.system.abuse":
+      severity: high
+      channels: ["discord"]
+      quietHours: false
+      cooldown: 600         # 10 min cooldown - abuse detection triggered
+
+  # Quiet Hours Configuration
+  # Suppress alerts during specified hours (except override_severities)
+  quiet_hours:
+    enabled: false                    # Set to true to enable quiet hours
+    start: "22:00"                    # Start time (HH:MM)
+    end: "07:00"                      # End time (HH:MM)
+    timezone: "America/New_York"      # Timezone for quiet hours
+    override_severities: ["high"]     # Severities that bypass quiet hours
 
 # MCP (Model Context Protocol) Integration
 # Connect to external MCP servers and use their tools as coda skills
