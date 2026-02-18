@@ -1,4 +1,5 @@
 """Route tests — basic request validation only (no DB/model dependency)."""
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -52,3 +53,62 @@ class TestSearchValidation:
     def test_search_missing_query(self):
         resp = client.post("/search", json={})
         assert resp.status_code == 422
+
+
+class TestMetadataNormalization:
+    @staticmethod
+    def _memory_row(metadata):
+        now = datetime.now(timezone.utc)
+        return {
+            "id": "c6a65e7a-33e8-48c1-b5e8-e9e06f876983",
+            "content": "Stored memory",
+            "content_type": "fact",
+            "tags": ["test"],
+            "importance": 0.7,
+            "source_type": "manual",
+            "source_id": None,
+            "metadata": metadata,
+            "content_hash": "abc123",
+            "access_count": 0,
+            "accessed_at": None,
+            "is_archived": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    @patch("src.routes.manage.list_memories", new_callable=AsyncMock)
+    def test_list_memories_tolerates_non_mapping_metadata(self, mock_list):
+        mock_list.return_value = [self._memory_row("legacy-string-value")]
+        resp = client.get("/memories")
+        assert resp.status_code == 200
+        assert resp.json()["results"][0]["metadata"] == {}
+
+    @patch("src.routes.manage.get_memory_by_id", new_callable=AsyncMock)
+    def test_get_memory_parses_json_object_metadata_string(self, mock_get):
+        mock_get.return_value = self._memory_row('{"source":"import","version":1}')
+        resp = client.get("/memories/c6a65e7a-33e8-48c1-b5e8-e9e06f876983")
+        assert resp.status_code == 200
+        assert resp.json()["metadata"] == {"source": "import", "version": 1}
+
+    @patch("src.routes.search.rank_results")
+    @patch("src.routes.search.vector_search", new_callable=AsyncMock, return_value=[])
+    @patch("src.routes.search.generate_embedding", return_value=[0.1] * 384)
+    def test_search_tolerates_array_metadata(self, _mock_embed, _mock_search, mock_rank):
+        now = datetime.now(timezone.utc)
+        mock_rank.return_value = [
+            {
+                "id": "d6289782-074a-4220-93ea-4c5fcf853421",
+                "content": "Result",
+                "content_type": "fact",
+                "tags": [],
+                "importance": 0.5,
+                "relevance_score": 0.9,
+                "created_at": now,
+                "source_type": "manual",
+                "metadata": ["bad", "shape"],
+            }
+        ]
+
+        resp = client.post("/search", json={"query": "test"})
+        assert resp.status_code == 200
+        assert resp.json()["results"][0]["metadata"] == {}

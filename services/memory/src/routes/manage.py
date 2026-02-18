@@ -2,7 +2,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from ..models import MemoryDetail, MemoryListRequest
+from ..models import MemoryDetail
+from ..services.serialization import normalize_metadata
 from ..services.storage import get_memory_by_id, list_memories, soft_delete_memory
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ async def list_memories_endpoint(
             importance=float(r.get("importance", 0.5)),
             source_type=r.get("source_type"),
             source_id=r.get("source_id"),
-            metadata=dict(r.get("metadata", {})) if r.get("metadata") else {},
+            metadata=normalize_metadata(r.get("metadata")),
             content_hash=r.get("content_hash"),
             access_count=int(r.get("access_count", 0)),
             accessed_at=r.get("accessed_at"),
@@ -63,7 +64,7 @@ async def get_memory(memory_id: str) -> MemoryDetail:
         importance=float(row.get("importance", 0.5)),
         source_type=row.get("source_type"),
         source_id=row.get("source_id"),
-        metadata=dict(row.get("metadata", {})) if row.get("metadata") else {},
+        metadata=normalize_metadata(row.get("metadata")),
         content_hash=row.get("content_hash"),
         access_count=int(row.get("access_count", 0)),
         accessed_at=row.get("accessed_at"),

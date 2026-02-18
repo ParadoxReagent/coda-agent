@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from .config import settings
 from .db import close_pool, init_pool
+from .logging_filters import SuppressHealthAccessFilter
 from .middleware.auth import ApiKeyMiddleware
 from .routes.health import router as health_router
 from .routes.ingest import router as ingest_router
@@ -16,6 +17,11 @@ logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+access_logger = logging.getLogger("uvicorn.access")
+if not any(isinstance(f, SuppressHealthAccessFilter) for f in access_logger.filters):
+    access_logger.addFilter(SuppressHealthAccessFilter())
+
 logger = logging.getLogger(__name__)
 
 

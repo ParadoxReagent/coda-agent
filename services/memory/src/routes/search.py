@@ -12,6 +12,7 @@ from ..models import (
 from ..services.context_assembly import assemble_context
 from ..services.embedding import generate_embedding
 from ..services.ranking import rank_results
+from ..services.serialization import normalize_metadata
 from ..services.storage import vector_search
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ async def search(req: SearchRequest) -> SearchResponse:
             relevance_score=r["relevance_score"],
             created_at=r["created_at"],
             source_type=r.get("source_type"),
-            metadata=dict(r.get("metadata", {})) if r.get("metadata") else {},
+            metadata=normalize_metadata(r.get("metadata")),
         )
         for r in ranked
     ]
