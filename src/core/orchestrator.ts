@@ -3,7 +3,14 @@ import type { SkillRegistry } from "../skills/registry.js";
 import type { ContextStore } from "./context.js";
 import type { EventBus } from "./events.js";
 import type { ConfirmationManager } from "./confirmation.js";
-import type { LLMContentBlock, LLMMessage, LLMToolDefinition } from "./llm/provider.js";
+import type {
+  LLMChatParams,
+  LLMContentBlock,
+  LLMMessage,
+  LLMProvider,
+  LLMResponse,
+  LLMToolDefinition,
+} from "./llm/provider.js";
 import type { Logger } from "../utils/logger.js";
 import type { NotesSkill } from "../skills/notes/skill.js";
 import type { MemorySkill } from "../skills/memory/skill.js";
@@ -22,6 +29,9 @@ const MAX_TOOL_CALLS_PER_SESSION = 50;
 const MAX_CONTINUATIONS = 1; // Only allow one continuation when max_tokens is hit
 const TOOL_EXECUTION_TIMEOUT_MS = 30_000;
 const MAX_MESSAGE_LENGTH = 4000;
+const DEFAULT_MAX_RESPONSE_TOKENS = 4096;
+const MIN_RESPONSE_TOKENS = 256;
+const MAX_TOKEN_BUDGET_RETRIES = 3;
 
 export class Orchestrator {
   private agentSkillDiscovery?: AgentSkillDiscovery;
@@ -102,6 +112,7 @@ export class Orchestrator {
       if (this.context.needsCompaction(userId, channel)) {
         try {
           this.logger.info({ userId, channel }, "Compacting conversation history");
+          let compactedSummary: string | null = null;
 
           // Create summarizer using light tier LLM
           const summarizer = async (messages: string[]): Promise<string> => {
@@ -110,21 +121,28 @@ export class Orchestrator {
               "light"
             );
             const conversationText = messages.join("\n\n");
-            const response = await provider.chat({
-              model,
-              system: "You are a conversation summarizer. Create a concise summary of the conversation history.",
-              messages: [
-                {
-                  role: "user",
-                  content: `Summarize this conversation in 2-3 sentences:\n\n${conversationText}`,
-                },
-              ],
-              maxTokens: 500,
-            });
-            return response.text ?? "Earlier conversation context.";
+            const response = await this.chatWithAdaptiveMaxTokens(
+              provider,
+              {
+                model,
+                system:
+                  "You are a conversation summarizer. Create a concise summary of the conversation history.",
+                messages: [
+                  {
+                    role: "user",
+                    content: `Summarize this conversation in 2-3 sentences:\n\n${conversationText}`,
+                  },
+                ],
+                maxTokens: 500,
+              },
+              { userId, channel, phase: "history_compaction_summary" }
+            );
+            compactedSummary = response.text ?? "Earlier conversation context.";
+            return compactedSummary;
           };
 
           await this.context.compactHistory(userId, channel, summarizer, 10);
+          await this.saveCompactionSummaryToMemory(userId, channel, compactedSummary);
 
           // Re-load history after compaction
           history = await this.context.getHistory(userId, channel);
@@ -191,13 +209,17 @@ export class Orchestrator {
       ];
 
       // 5. Initial LLM call
-      let response = await provider.chat({
-        model,
-        system,
-        messages,
-        tools,
-        maxTokens: 4096,
-      });
+      let response = await this.chatWithAdaptiveMaxTokens(
+        provider,
+        {
+          model,
+          system,
+          messages,
+          tools,
+          maxTokens: DEFAULT_MAX_RESPONSE_TOKENS,
+        },
+        { userId, channel, phase: "initial_response" }
+      );
 
       // 6. Track usage
       await this.providerManager.trackUsage(
@@ -329,13 +351,17 @@ export class Orchestrator {
         ];
 
         // Continue the conversation
-        response = await provider.chat({
-          model,
-          system,
-          messages: continuationMessages,
-          tools,
-          maxTokens: 4096,
-        });
+        response = await this.chatWithAdaptiveMaxTokens(
+          provider,
+          {
+            model,
+            system,
+            messages: continuationMessages,
+            tools,
+            maxTokens: DEFAULT_MAX_RESPONSE_TOKENS,
+          },
+          { userId, channel, phase: "tool_result_continuation" }
+        );
 
         await this.providerManager.trackUsage(
           provider.name,
@@ -363,13 +389,17 @@ export class Orchestrator {
         ];
 
         try {
-          const continuation = await provider.chat({
-            model,
-            system,
-            messages: continuationMessages,
-            tools,
-            maxTokens: 4096,
-          });
+          const continuation = await this.chatWithAdaptiveMaxTokens(
+            provider,
+            {
+              model,
+              system,
+              messages: continuationMessages,
+              tools,
+              maxTokens: DEFAULT_MAX_RESPONSE_TOKENS,
+            },
+            { userId, channel, phase: "max_tokens_continuation" }
+          );
 
           await this.providerManager.trackUsage(provider.name, model, continuation.usage, currentTier);
 
@@ -619,6 +649,145 @@ export class Orchestrator {
       this.logger.error({ error: err }, "Failed to fetch memory context");
     }
     return null;
+  }
+
+  private async chatWithAdaptiveMaxTokens(
+    provider: LLMProvider,
+    params: LLMChatParams,
+    context: { userId: string; channel: string; phase: string }
+  ): Promise<LLMResponse> {
+    let maxTokens = params.maxTokens ?? DEFAULT_MAX_RESPONSE_TOKENS;
+    let budgetRetries = 0;
+
+    while (true) {
+      try {
+        return await provider.chat({ ...params, maxTokens });
+      } catch (err) {
+        const reduced = this.getReducedMaxTokens(err, maxTokens);
+        if (reduced === null || budgetRetries >= MAX_TOKEN_BUDGET_RETRIES) {
+          throw err;
+        }
+
+        budgetRetries += 1;
+        this.logger.warn(
+          {
+            ...context,
+            requestedMaxTokens: maxTokens,
+            retryMaxTokens: reduced,
+            budgetRetries,
+            error: err,
+          },
+          "LLM request exceeded token affordability; retrying with reduced max_tokens"
+        );
+        maxTokens = reduced;
+      }
+    }
+  }
+
+  private getReducedMaxTokens(err: unknown, currentMaxTokens: number): number | null {
+    const statusCode = this.extractErrorStatusCode(err);
+    const message = this.extractErrorMessage(err);
+    const isBudgetError =
+      statusCode === 402 ||
+      /requires more credits|fewer max_tokens|can only afford|insufficient credits/i.test(
+        message
+      );
+
+    if (!isBudgetError || currentMaxTokens <= MIN_RESPONSE_TOKENS) {
+      return null;
+    }
+
+    const affordMatch = message.match(/can only afford\s+(\d+)/i);
+    let reduced = affordMatch
+      ? Number.parseInt(affordMatch[1] ?? "", 10) - 64
+      : Math.floor(currentMaxTokens * 0.6);
+
+    if (!Number.isFinite(reduced)) {
+      reduced = Math.floor(currentMaxTokens * 0.6);
+    }
+
+    reduced = Math.max(MIN_RESPONSE_TOKENS, reduced);
+    reduced = Math.min(reduced, currentMaxTokens - 64);
+
+    if (reduced < MIN_RESPONSE_TOKENS) {
+      return null;
+    }
+
+    return reduced;
+  }
+
+  private extractErrorStatusCode(err: unknown): number | null {
+    if (!err || typeof err !== "object") return null;
+    const anyErr = err as Record<string, unknown>;
+
+    if (typeof anyErr.status === "number") return anyErr.status;
+    if (typeof anyErr.statusCode === "number") return anyErr.statusCode;
+    if (typeof anyErr.code === "number") return anyErr.code;
+    if (
+      anyErr.response &&
+      typeof (anyErr.response as Record<string, unknown>).status === "number"
+    ) {
+      return (anyErr.response as Record<string, unknown>).status as number;
+    }
+    if (
+      anyErr.error &&
+      typeof (anyErr.error as Record<string, unknown>).code === "number"
+    ) {
+      return (anyErr.error as Record<string, unknown>).code as number;
+    }
+
+    return null;
+  }
+
+  private extractErrorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (!err || typeof err !== "object") return String(err);
+
+    const anyErr = err as Record<string, unknown>;
+    if (typeof anyErr.message === "string") return anyErr.message;
+    if (
+      anyErr.error &&
+      typeof (anyErr.error as Record<string, unknown>).message === "string"
+    ) {
+      return (anyErr.error as Record<string, unknown>).message as string;
+    }
+    return String(err);
+  }
+
+  private async saveCompactionSummaryToMemory(
+    userId: string,
+    channel: string,
+    summary: string | null
+  ): Promise<void> {
+    if (!summary?.trim()) return;
+    if (!this.skills.getSkillByName("memory")) return;
+
+    const nowIso = new Date().toISOString();
+    const dateTag = nowIso.slice(0, 10);
+    const memoryContent = `Compacted conversation summary recorded on ${nowIso} for channel "${channel}":\n${summary}`;
+
+    try {
+      await this.skills.executeToolCall(
+        "memory_save",
+        {
+          content: memoryContent,
+          content_type: "summary",
+          tags: ["compaction-summary", dateTag, `channel:${channel}`],
+          importance: 0.7,
+          user_id: userId,
+        },
+        { isSubagent: false, userId }
+      );
+      this.logger.info(
+        { userId, channel, date: dateTag },
+        "Saved compaction summary to memory"
+      );
+    } catch (err) {
+      this.logger.warn(
+        { userId, channel, error: err },
+        "Failed to save compaction summary to memory"
+      );
+    }
   }
 
   private async buildSystemPrompt(userId: string, userMessage?: string, tools?: LLMToolDefinition[]): Promise<string> {

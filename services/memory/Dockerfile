@@ -7,10 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps
+# Install Python deps with increased timeout and retries
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+    pip install --timeout=1000 --retries=5 -r requirements.txt
 
 # Pre-download the embedding model at build time (cache the model downloads)
 RUN --mount=type=cache,target=/root/.cache/torch \

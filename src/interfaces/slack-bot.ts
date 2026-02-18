@@ -6,6 +6,7 @@ import type { Logger } from "../utils/logger.js";
 import type { InboundAttachment, OrchestratorResponse } from "../core/types.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
 import { TempDirManager } from "../core/temp-dir.js";
+import { formatUserFacingError } from "./user-facing-error.js";
 
 interface SlackBotConfig {
   appToken: string;
@@ -269,7 +270,7 @@ export class SlackBot {
         }
 
         await say({
-          text: "Sorry, I encountered an error processing your message. Please try again.",
+          text: formatUserFacingError(err),
           thread_ts: threadTs ?? ts,
         });
       } finally {

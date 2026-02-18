@@ -21,6 +21,7 @@ import type { InboundAttachment, OrchestratorResponse } from "../core/types.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
 import { TempDirManager } from "../core/temp-dir.js";
 import type { McpServerManager } from "../integrations/mcp/manager.js";
+import { formatUserFacingError } from "./user-facing-error.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -243,9 +244,7 @@ export class DiscordBot {
       }
     } catch (err) {
       this.logger.error({ error: err }, "Orchestrator error");
-      await channel.send(
-        "Sorry, I encountered an error processing your message. Please try again."
-      );
+      await channel.send(formatUserFacingError(err));
     } finally {
       // Clean up temp directory only if:
       // 1. No confirmation is pending, AND
