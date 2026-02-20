@@ -6,6 +6,7 @@ import { ToolInputValidator } from "../core/tool-validator.js";
 import type { SkillHealthTracker } from "../core/skill-health.js";
 import type { RateLimiter } from "../core/rate-limiter.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
+import type { AuditService } from "../core/audit.js";
 
 interface RegisteredSkill {
   skill: Skill;
@@ -27,15 +28,23 @@ export class SkillRegistry {
   private logger: Logger;
   private healthTracker?: SkillHealthTracker;
   private rateLimiter?: RateLimiter;
+  private auditService?: AuditService;
 
   constructor(
     logger: Logger,
     healthTracker?: SkillHealthTracker,
-    rateLimiter?: RateLimiter
+    rateLimiter?: RateLimiter,
+    auditService?: AuditService
   ) {
     this.logger = logger;
     this.healthTracker = healthTracker;
     this.rateLimiter = rateLimiter;
+    this.auditService = auditService;
+  }
+
+  /** Wire the audit service after construction (avoids circular dep at startup). */
+  setAuditService(auditService: AuditService): void {
+    this.auditService = auditService;
   }
 
   /** Register a skill — validates config requirements and indexes tools. */
@@ -194,28 +203,46 @@ export class SkillRegistry {
       );
     }
 
+    // Build input summary — key names only for sensitive tools
+    const inputSummary = toolDef?.sensitive
+      ? `keys: ${Object.keys(toolInput).join(", ")}`
+      : Object.keys(toolInput).join(", ");
+
     // Execute with health tracking
     const startMs = Date.now();
     try {
       const result = await registered.skill.execute(toolName, toolInput);
+      const durationMs = Date.now() - startMs;
       this.healthTracker?.recordSuccess(skillName);
 
-      // Audit log
       this.logger.debug(
         {
           skill: skillName,
           tool: toolName,
           inputKeys: Object.keys(toolInput),
-          durationMs: Date.now() - startMs,
+          durationMs,
           status: "success",
           external: !this.isInternalSkill(skillName),
         },
         "Tool call executed"
       );
 
+      // Structured audit record
+      void this.auditService?.write({
+        eventType: "tool_call",
+        skillName,
+        toolName,
+        inputSummary,
+        durationMs,
+        status: "success",
+        permissionTier: toolDef?.permissionTier,
+        userId: context?.userId,
+      });
+
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      const durationMs = Date.now() - startMs;
       this.healthTracker?.recordFailure(skillName, error);
 
       this.logger.debug(
@@ -223,12 +250,24 @@ export class SkillRegistry {
           skill: skillName,
           tool: toolName,
           inputKeys: Object.keys(toolInput),
-          durationMs: Date.now() - startMs,
+          durationMs,
           status: "error",
           external: !this.isInternalSkill(skillName),
         },
         "Tool call failed"
       );
+
+      void this.auditService?.write({
+        eventType: "tool_call",
+        skillName,
+        toolName,
+        inputSummary,
+        durationMs,
+        status: "error",
+        permissionTier: toolDef?.permissionTier,
+        metadata: { error: error.message.slice(0, 500) },
+        userId: context?.userId,
+      });
 
       // Return user-friendly error with sanitized message
       const sanitized = ContentSanitizer.sanitizeErrorMessage(error.message);
@@ -248,16 +287,27 @@ export class SkillRegistry {
     return internalSkills.has(skillName);
   }
 
-  /** Check if a tool requires confirmation. */
-  toolRequiresConfirmation(toolName: string): boolean {
+  /**
+   * Get the effective permission tier for a tool.
+   * Explicit permissionTier takes precedence. Backwards-compat:
+   * - requiresConfirmation=true → tier 3
+   * - sensitive=true (no explicit tier) → tier 2
+   * - default → tier 2
+   */
+  getToolPermissionTier(toolName: string): 0 | 1 | 2 | 3 | 4 {
     const skillName = this.toolToSkill.get(toolName);
-    if (!skillName) return false;
+    if (!skillName) return 2;
+    const tool = this.skills.get(skillName)?.tools.get(toolName);
+    if (!tool) return 2;
+    if (tool.permissionTier !== undefined) return tool.permissionTier;
+    if (tool.requiresConfirmation) return 3;
+    if (tool.sensitive) return 2;
+    return 2;
+  }
 
-    const registered = this.skills.get(skillName);
-    if (!registered) return false;
-
-    const tool = registered.tools.get(toolName);
-    return tool?.requiresConfirmation === true;
+  /** Check if a tool requires confirmation (tier ≥ 3 or explicit requiresConfirmation). */
+  toolRequiresConfirmation(toolName: string): boolean {
+    return this.getToolPermissionTier(toolName) >= 3;
   }
 
   /** Check if a tool is marked as sensitive (accesses private data). */

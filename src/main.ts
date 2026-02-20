@@ -42,6 +42,16 @@ import { DoctorSkill } from "./skills/doctor/skill.js";
 import { SubagentManager } from "./core/subagent-manager.js";
 import { TierClassifier } from "./core/tier-classifier.js";
 import { DockerExecutorSkill } from "./skills/docker-executor/skill.js";
+import { AuditService } from "./core/audit.js";
+import { AuditSkill } from "./skills/audit/skill.js";
+import { RoutingDecisionLogger } from "./core/routing-logger.js";
+import { ConfigWatcher } from "./utils/config-watcher.js";
+import { MessageSender } from "./core/message-sender.js";
+import { SelfAssessmentService } from "./core/self-assessment.js";
+import { PromptManager } from "./core/prompt-manager.js";
+import { LearnedTierClassifier } from "./core/learned-classifier.js";
+import { SelfImprovementSkill } from "./skills/self-improvement/skill.js";
+import { TaskExecutionSkill } from "./skills/tasks/skill.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
@@ -60,6 +70,8 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
     firecrawl: config.firecrawl,
     weather: config.weather,
     n8n: config.n8n,
+    "self-improvement": config.self_improvement,
+    tasks: config.tasks,
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
 }
@@ -86,6 +98,24 @@ async function main() {
 
   // 2b. Preferences manager
   const preferencesManager = new PreferencesManager(db, logger);
+
+  // 2c. Audit service (writes to audit_log table)
+  const auditService = new AuditService(db, logger);
+
+  // 2d. Routing decision logger
+  const routingDecisionLogger = new RoutingDecisionLogger(db, logger);
+
+  // 2e. Message sender (channels registered after bots start, below)
+  const messageSender = new MessageSender(logger, auditService);
+
+  // 2f. Self-assessment service (4.1)
+  const selfAssessmentService = new SelfAssessmentService(db, logger);
+
+  // 2g. Prompt manager (4.3)
+  const promptManager = new PromptManager(db, logger);
+
+  // 2h. Learned tier classifier (4.4)
+  const learnedClassifier = new LearnedTierClassifier(db, logger);
 
   // 3. Initialize Redis
   const redis = new Redis(config.redis.url);
@@ -138,6 +168,10 @@ async function main() {
   }, preferencesManager);
   alertRouter.attachToEventBus(eventBus);
 
+  // Config hot-reload watcher (event bus now available)
+  const configPath = process.env.CONFIG_PATH ?? "./config/config.yaml";
+  const configWatcher = new ConfigWatcher(configPath, logger, eventBus);
+
   // Initialize task scheduler
   const taskScheduler = new TaskScheduler(logger, eventBus);
 
@@ -178,8 +212,8 @@ async function main() {
   const confirmationManager = new ConfirmationManager(logger, eventBus);
   const rateLimiter = new RateLimiter(redis, logger);
 
-  // 5. Create skill registry with health tracking and rate limiting
-  const skillRegistry = new SkillRegistry(logger, skillHealthTracker, rateLimiter);
+  // 5. Create skill registry with health tracking, rate limiting, and audit
+  const skillRegistry = new SkillRegistry(logger, skillHealthTracker, rateLimiter, auditService);
 
   // 6. Register internal skills
   skillRegistry.register(new NotesSkill());
@@ -291,6 +325,23 @@ async function main() {
     ? new TierClassifier(config.llm.tiers)
     : undefined;
 
+  // Wire learned classifier into tier classifier (starts empty, retrains weekly)
+  if (tierClassifier) {
+    tierClassifier.setLearnedClassifier(learnedClassifier);
+  }
+
+  // Register routing retrain cron
+  const routingRetrainCron = config.self_improvement?.routing_retrain_cron ?? "0 4 * * 0";
+  taskScheduler.registerTask({
+    name: "routing.retrain",
+    cronExpression: routingRetrainCron,
+    handler: async () => {
+      logger.info("Running learned classifier retrain");
+      await learnedClassifier.retrain();
+    },
+    description: "Weekly retrain of learned tier classifier from routing_decisions + self_assessments",
+  });
+
   const orchestrator = new Orchestrator(
     providerManager,
     skillRegistry,
@@ -300,8 +351,43 @@ async function main() {
     logger,
     agentSkillDiscovery,
     tierClassifier,
-    config.security
+    config.security,
+    routingDecisionLogger
   );
+
+  // Wire self-assessment and prompt-manager into orchestrator
+  orchestrator.setSelfAssessmentService(selfAssessmentService);
+  orchestrator.setPromptManager(promptManager);
+
+  // Register audit skill (read-only agent self-introspection)
+  skillRegistry.register(new AuditSkill(auditService));
+
+  // Register tasks skill (4.5)
+  if (config.tasks?.enabled !== false) {
+    const tasksSkill = new TaskExecutionSkill({
+      max_active_per_user: config.tasks?.max_active_per_user,
+      resume_cron: config.tasks?.resume_cron,
+    });
+    skillRegistry.register(tasksSkill);
+  }
+
+  // Register self-improvement skill (4.2 + 4.3)
+  if (config.self_improvement?.enabled !== false) {
+    const selfImprovementSkill = new SelfImprovementSkill({
+      reflection_cron: config.self_improvement?.reflection_cron,
+      approval_channel: config.self_improvement?.approval_channel,
+      prompt_evolution_enabled: config.self_improvement?.prompt_evolution_enabled,
+    });
+    selfImprovementSkill.setPromptManager(promptManager);
+    selfImprovementSkill.setAuditService(auditService);
+    selfImprovementSkill.setSystemPromptGetter(
+      (userId: string) => orchestrator.getSystemPromptSnapshot(userId)
+    );
+    selfImprovementSkill.setToolListGetter(
+      () => skillRegistry.getToolDefinitions().map(t => t.name)
+    );
+    skillRegistry.register(selfImprovementSkill);
+  }
 
   // 8a. Initialize DoctorService
   const doctorService = new DoctorService(logger, {
@@ -355,9 +441,40 @@ async function main() {
   );
   subagentSkill.setManager(subagentManager);
 
+  // Helper: build Opus LLM client (for privileged skills like self-improvement)
+  const opusModel = config.self_improvement?.opus_model;
+
+  function buildOpusLlm(): SkillContext["opusLlm"] {
+    // If no specific opus config, fall back to heavy tier
+    return {
+      async chat(params) {
+        // Try to use the configured opus provider; fall back to heavy tier
+        let provider;
+        let model;
+        try {
+          const heavySelection = await providerManager.getForUserTiered("system", "heavy");
+          provider = heavySelection.provider;
+          model = opusModel ?? heavySelection.model;
+        } catch {
+          const selection = await providerManager.getForUser("system");
+          provider = selection.provider;
+          model = opusModel ?? selection.model;
+        }
+        const response = await provider.chat({
+          model,
+          system: params.system,
+          messages: params.messages.map((m) => ({ role: m.role, content: m.content })),
+          maxTokens: params.maxTokens ?? 4096,
+        });
+        return { text: response.text };
+      },
+    };
+  }
+
   // 9. Start all skills with context (real Redis-backed + scheduler)
   await skillRegistry.startupAll((skillName: string): SkillContext => {
     const prefix = `skill:${skillName}:`;
+    const isPrivilegedSkill = skillName === "self-improvement";
     return {
       config: getSkillConfig(skillName, config),
       logger: logger.child({ skill: skillName }),
@@ -391,6 +508,8 @@ async function main() {
           return { text: response.text };
         },
       },
+      // Inject Opus LLM only for privileged skills
+      opusLlm: isPrivilegedSkill ? buildOpusLlm() : undefined,
       conversations: {
         async getHistory(userId: string) {
           const history = await contextStore.getHistory(userId);
@@ -404,6 +523,7 @@ async function main() {
           return contextStore.getAllHistories();
         },
       },
+      messageSender,
     };
   });
 
@@ -480,6 +600,23 @@ async function main() {
     }
   });
 
+  // 10c. Register messaging channels with MessageSender for proactive sends
+  messageSender.registerChannel({
+    id: "discord",
+    name: "Discord",
+    send: (msg) => discordBot.sendNotification(msg),
+  });
+  if (slackBot) {
+    messageSender.registerChannel({
+      id: "slack",
+      name: "Slack",
+      send: (msg) => slackBot!.sendNotification(msg),
+    });
+  }
+
+  // 10d. Start config hot-reload watcher (after event bus is running)
+  configWatcher.start();
+
   // 11. Start REST API (health checks) with real service deps
   const restApi = new RestApi(logger, {
     redis,
@@ -501,6 +638,7 @@ async function main() {
   // 13. Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Received shutdown signal");
+    configWatcher.stop();
     doctorService.stop();
     clearInterval(confirmationCleanupInterval);
     await subagentManager.shutdown();

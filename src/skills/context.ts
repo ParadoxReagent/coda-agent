@@ -5,6 +5,7 @@
 import type { Logger } from "../utils/logger.js";
 import type { EventBus } from "../core/events.js";
 import type { Database } from "../db/index.js";
+import type { MessageSender } from "../core/message-sender.js";
 
 /**
  * A Redis-like client interface that auto-prefixes keys with the skill name.
@@ -65,9 +66,29 @@ export interface SkillContext {
     }): Promise<{ text: string | null }>;
   };
 
+  /**
+   * Optional Opus-tier LLM access — only injected for privileged skills
+   * (e.g., self-improvement weekly reflection). Uses the same chat() interface.
+   * Falls back to regular llm if not injected.
+   */
+  opusLlm?: {
+    chat(params: {
+      system: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+      maxTokens?: number;
+    }): Promise<{ text: string | null }>;
+  };
+
   /** Optional conversation history access for summarization and analysis. */
   conversations?: {
     getHistory(userId: string): Promise<Array<{ role: string; content: string; timestamp: number }>>;
     getAllHistories(): Map<string, Array<{ role: string; content: string; channel: string; timestamp: number }>>;
   };
+
+  /**
+   * Optional proactive message sender — lets skills push messages without
+   * waiting for a user request. Rate-limited (10/hr per channel by default).
+   * Only channels registered at startup are eligible.
+   */
+  messageSender?: MessageSender;
 }

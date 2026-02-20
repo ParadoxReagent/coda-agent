@@ -1,4 +1,5 @@
 import type { TierConfig } from "../utils/config.js";
+import type { LearnedTierClassifier } from "./learned-classifier.js";
 
 export interface TierClassification {
   tier: "light" | "heavy";
@@ -12,7 +13,7 @@ export interface TierClassification {
  * - Heavy tier: capable models for complex tasks (research, analysis, subagent spawning)
  *
  * Approach:
- * 1. Every request starts with light tier
+ * 1. Check learned classifier first (if confidence > 0.7, use it)
  * 2. Heuristic pre-filter catches obvious complex requests (keywords, message length)
  * 3. If light model calls a "heavy" tool, system escalates to heavy tier mid-turn
  */
@@ -20,6 +21,7 @@ export class TierClassifier {
   private heavyTools: Set<string>;
   private heavyPatterns: RegExp[];
   private heavyMessageLength: number;
+  private learnedClassifier?: LearnedTierClassifier;
 
   constructor(config: TierConfig) {
     this.heavyTools = new Set(config.heavy_tools);
@@ -29,13 +31,26 @@ export class TierClassifier {
     this.heavyMessageLength = config.heavy_message_length;
   }
 
+  /** Wire in the learned classifier (called after retrain). */
+  setLearnedClassifier(lc: LearnedTierClassifier): void {
+    this.learnedClassifier = lc;
+  }
+
   /**
    * Classify a message to determine initial tier.
    * Returns "heavy" if the message matches heavy patterns or exceeds length threshold.
    * Otherwise returns "light".
    */
   classifyMessage(message: string): TierClassification {
-    // Check message length
+    // 1. Check learned classifier first (confidence threshold: 0.7)
+    if (this.learnedClassifier) {
+      const learned = this.learnedClassifier.classify(message);
+      if (learned) {
+        return { tier: learned.tier, reason: learned.reason };
+      }
+    }
+
+    // 2. Check message length
     if (message.length > this.heavyMessageLength) {
       return {
         tier: "heavy",
@@ -43,7 +58,7 @@ export class TierClassifier {
       };
     }
 
-    // Check for heavy patterns
+    // 3. Check for heavy patterns
     for (const pattern of this.heavyPatterns) {
       if (pattern.test(message)) {
         return {

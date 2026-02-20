@@ -273,6 +273,25 @@ const McpConfigSchema = z.object({
   servers: z.record(McpServerConfigSchema).default({}),
 });
 
+const SelfImprovementConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  opus_provider: z.string().optional(),
+  opus_model: z.string().optional(),
+  reflection_cron: z.string().default("0 3 * * 0"), // Sunday 3 AM
+  assessment_enabled: z.boolean().default(true),
+  prompt_evolution_enabled: z.boolean().default(false),
+  max_reflection_input_tokens: z.number().default(8000),
+  approval_channel: z.string().default("discord"),
+  routing_retrain_cron: z.string().default("0 4 * * 0"), // Sunday 4 AM
+});
+
+const TasksConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  resume_cron: z.string().default("*/15 * * * *"),
+  max_active_per_user: z.number().default(5),
+  max_auto_resume_attempts: z.number().default(3),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -308,9 +327,13 @@ const AppConfigSchema = z.object({
   security: SecurityConfigSchema.optional(),
   execution: ExecutionConfigSchema.optional(),
   mcp: McpConfigSchema.optional(),
+  self_improvement: SelfImprovementConfigSchema.optional(),
+  tasks: TasksConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type SelfImprovementConfig = z.infer<typeof SelfImprovementConfigSchema>;
+export type TasksConfig = z.infer<typeof TasksConfigSchema>;
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
 export type FirecrawlConfig = z.infer<typeof FirecrawlConfigSchema>;
 export type WeatherConfig = z.infer<typeof WeatherConfigSchema>;

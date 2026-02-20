@@ -1,6 +1,7 @@
-# AI Agent Implementation Roadmap
-### From Reactive Assistant to Autonomous Agent
-*5 Phases · Personal Home Lab · Containerized · API-First*
+# Unified Coda-Agent Roadmap
+### Reactive Assistant → Autonomous Agent + OpenClaw-Inspired Improvements
+
+*~100–130 hours remaining across Phases 1–5 · Personal Home Lab · Containerized · API-First*
 
 ---
 
@@ -8,20 +9,20 @@
 
 | | |
 |---|---|
-| **Models** | Multi-provider · Haiku (light tasks) → Sonnet (complex) · Opus reserved for reasoning |
+| **Models** | Multi-provider · Haiku (light) → Sonnet (complex) · Opus reserved for reasoning |
 | **Storage** | Postgres + pgvector (384-dim) · tsvector FTS · Redis Streams event bus |
-| **Runtime** | Fully containerized (Docker Compose) · Home lab (Proxmox) · 279 automated tests |
-| **Built-in Skills** | Reminders, Notes, Memory, Doctor, Scheduler, Docker Executor, Subagents (7 total) |
+| **Runtime** | Fully containerized (Docker Compose) · Home lab (Proxmox) |
+| **Built-in Skills** | Reminders, Notes, Memory, Doctor, Scheduler, Docker Executor, Subagents, Audit, **Tasks, Self-Improvement** (10 total) |
 | **Agent Skills** | web-research, pdf, skill-creator, algorithmic-art, mcp-builder, slack-gif-creator, frontend-design (7 total) |
-| **Integrations** | MCP (stdio + HTTP, multi-transport), n8n, Firecrawl, Weather, Discord, Slack (6 total) |
-| **Constraints** | No local models >7b · No fine-tuning · API-dependent · Personal use only |
+| **Integrations** | MCP (stdio + HTTP), n8n, Firecrawl, Weather, Discord, Slack (6 total) |
+| **New (Phase 1)** | Audit log, solution_patterns table, routing_decisions table, permission tiers, config hot-reload, MessageSender |
+| **New (Phase 4)** | Self-assessments, improvement_proposals, prompt_versions, task_state tables; SelfImprovementSkill, TaskExecutionSkill, PromptManager, LearnedTierClassifier, SelfAssessmentService |
 
 ---
 
 ## Core Design Philosophy
 
 Since fine-tuning is off the table, "learning" happens at four levels:
-
 - **Memory accumulation** — the system remembers what worked for you specifically
 - **Context enrichment** — better retrieval means the model gets smarter inputs
 - **Prompt/tool evolution** — system prompts and routing logic improve over time
@@ -31,348 +32,310 @@ Opus is reserved for infrequent but high-value reasoning tasks: self-improvement
 
 ---
 
-## Summary Timeline
+## Phase 1 — Observability & Memory Foundation ✅
 
-| Phase | Timeline | Key Deliverable | Capability Unlocked |
-|---|---|---|---|
-| ~~Foundation~~ | ~~Done~~ | ~~Semantic memory + event bus + all skills/integrations~~ | ~~Deployed and operational~~ |
-| 1 | Weeks 1–2 | Solution patterns + routing observability | Remembers resolved solutions, visible routing decisions |
-| 2 | Weeks 2–5 | HA integration + proactive briefings | Surfaces things you didn't ask for |
-| 3 | Weeks 5–9 | Reflection cycle + prompt evolution | Identifies and patches its own weaknesses |
-| 4 | Weeks 9–14 | Specialist agents + critique loop | Parallelizes work, self-validates actions |
-| 5 | Months 4–6+ | Autonomous gap closure | Proposes and builds its own improvements |
+*Theme: Build the data foundation that all intelligence features depend on. Every hour of audit data collected now pays dividends in later phases.*
 
----
+### ✅ 1.1 Audit System
+Persistent, queryable audit trail for every tool call and significant system event.
 
-## Foundation Work: Complete
+**Implemented:**
+- `audit_log` Drizzle table: `id, correlation_id, user_id, channel, event_type, skill_name, tool_name, input_summary, duration_ms, status, tier, model, provider, permission_tier, metadata, created_at`
+- Hooked into `SkillRegistry.executeToolCall()` — fire-and-forget writes
+- Sensitive tool inputs: key names stored only, never values
+- `AuditSkill` with `audit_query` and `audit_stats` tools for agent self-introspection (mainAgentOnly)
+- `src/core/audit.ts`, `src/skills/audit/skill.ts`
 
-All of the following were built as part of bringing coda-agent to its current state. These items are **done** and should not be re-implemented.
+### ✅ 1.2 Solution Pattern Store
+Table ready for multi-step successful resolutions to be stored as few-shot retrieval examples.
 
-### Memory & Storage
-- [x] `memories` table with pgvector (384-dim embeddings), tsvector full-text search, importance scoring, access count, tags, archival
-- [x] Semantic memory Python microservice (sentence transformers, auto-injection into every conversation)
-- [x] `contextFacts` table for long-term extracted facts per user
-- [x] `notes` table with PostgreSQL tsvector full-text search
-- [x] `conversations` table for medium/long-term conversation history
-- [x] `skillsConfig` table for per-skill runtime config and state
+**Implemented:**
+- `solution_patterns` table: `id, title, task_type, problem_description, resolution_steps (jsonb), tools_used[], outcome, source_memory_id, embedding (vector), tags[], retrieval_count, created_at`
+- Population by Phase 4 weekly Opus reflection cycle
 
-### Routing & Infrastructure
-- [x] Dual-tier LLM routing: Haiku (light) → Sonnet (complex)
-- [x] Multi-provider LLM support with fallback
-- [x] `llmUsage` table tracking tokens + estimated cost per provider/model/day
-- [x] Redis Streams event bus (reminders, alerts, health checks)
-- [x] `alertHistory` table (delivery tracking, suppression, suppression reason)
-- [x] `userPreferences` table (DND, quiet hours, timezone, alerts-only mode)
-- [x] Docker Compose deployment, fully containerized
+### ✅ 1.3 Routing Decision Logger
+Logs every LLM routing decision to Postgres for observability and Phase 4 self-improvement.
 
-### Skills (7 Built-in)
-- [x] **Reminders** — natural language time parsing, recurring, snooze, background checker
-- [x] **Notes** — full-text search with tsvector, tags, `context:always` injection
-- [x] **Memory** — semantic similarity search, importance-weighted, auto-context injection
-- [x] **Doctor** — self-healing, error classification, pattern detection, truncation handling
-- [x] **Scheduler** — runtime cron management, per-skill scheduled tasks
-- [x] **Docker Executor** — sandboxed ephemeral containers, resource limits, image whitelist
-- [x] **Subagents** — isolated sessions, concurrency limits, transcript tracking, parent/child runs, async + sync modes
+**Implemented:**
+- `routing_decisions` table: `id, session_id, correlation_id, user_id, channel, task_type, model_chosen, provider, tier, rationale, input_complexity_score, latency_ms, created_at`
+- `RoutingDecisionLogger` hooked into `Orchestrator.handleMessageInner()` after tier selection
+- Both tier-enabled and tier-disabled paths logged
+- `src/core/routing-logger.ts`
 
-### Agent Skills (7 Shipped)
-- [x] **web-research** — guided research strategies using Firecrawl
-- [x] **pdf** — extract text, fill forms, merge documents (sandboxed Docker)
-- [x] **skill-creator** — scaffold, validate, and package new agent skills
-- [x] **algorithmic-art** — generative art via code execution
-- [x] **mcp-builder** — build and test new MCP servers
-- [x] **slack-gif-creator** — programmatic GIF generation
-- [x] **frontend-design** — UI/component design assistance
+### ✅ 1.4 Permission Tier System (accelerated from Phase 5)
+Formalized ad-hoc confirmation/sensitive flags into explicit permission tiers.
 
-### Integrations (6)
-- [x] **MCP** — stdio + HTTP transports, tool allowlist/blocklist, confirmation gates, injection sanitization
-- [x] **n8n** — webhook bridge, flexible event querying, priority/tag filtering
-- [x] **Firecrawl** — scrape, crawl, map, search with Redis caching
-- [x] **Weather** — current conditions and forecast
-- [x] **Discord** — bidirectional file attachments, reactions, thread support
-- [x] **Slack** — bidirectional file attachments, OAuth, `files.uploadV2`
+**Implemented:**
+- `permissionTier?: 0|1|2|3|4` added to `SkillToolDefinition` in `base.ts`
+- `getToolPermissionTier()` method on `SkillRegistry` — tier ≥3 requires confirmation
+- `toolRequiresConfirmation()` now returns `true` for tier ≥3 (backwards compatible)
+- Default for unannotated tools = 2; `requiresConfirmation: true` → tier 3; `sensitive: true` → tier 2
 
-### Monitoring Infrastructure
-- [x] `knownClients` table for UniFi device tracking (schema ready, integration not yet wired)
-- [x] `subagentRuns` table with full lifecycle (accepted → running → completed/failed → archived)
-- [x] 279 automated tests
+| Tier | Scope | Behaviour |
+|------|-------|-----------|
+| 0 | Read-only | Always allowed, no confirmation |
+| 1 | Write personal data | Auto-approved, audit logged |
+| 2 | External read (default) | Logged, allowed |
+| 3 | External action / destructive | Requires user confirmation |
+| 4 | Irreversible | Requires confirmation |
 
----
+### ✅ 1.5 Config Hot-Reload
+Watches `config/config.yaml` for changes and hot-applies non-structural settings.
 
-## Phase 1 — Memory Refinement & Routing Observability
-**Timeline: Weeks 1–2 · ~8–12 hours remaining**
+**Implemented:**
+- `ConfigWatcher` class using `fs.watch`, 500ms debounce
+- Re-parses through Zod on change, publishes `config.reloaded` event on event bus
+- **Hot-reloadable**: alert rules, quiet hours, tier thresholds/patterns, subagent limits, scheduler overrides
+- **NOT reloadable**: API keys, DB/Redis URLs, tokens, skill registrations
+- Invalid config = warning + keep running config unchanged
+- `src/utils/config-watcher.ts`
 
-The foundation is solid. This phase closes the remaining gaps: a dedicated solution pattern store for few-shot retrieval, a hybrid retrieval upgrade that combines cosine similarity with recency weighting, routing decision logging (critical dependency for Phase 3), and a structured memory write policy that triggers automatically on task completion.
+### ✅ 1.6 Proactive Message Sender
+Generalized outbound messaging interface for skills and scheduled tasks.
 
-### 1.1 Solution Pattern Store
+**Implemented:**
+- `MessageSender` class with `send()` and `broadcast()` methods
+- Rate-limited (10/hour per channel by default), allowlisted channels only
+- Discord and Slack registered as channels in `main.ts`
+- Available to all skills via `SkillContext.messageSender`
+- All sends fire-and-forget, audit logged
+- `src/core/message-sender.ts`
 
-The `memories` table handles general facts and preferences well. Multi-step successful resolutions deserve their own table so they can be retrieved as few-shot examples by task type.
-
-**`solution_patterns` table**
-- Fields: `id`, `title`, `task_type`, `problem_description`, `resolution_steps` (jsonb), `tools_used[]`, `outcome` (success/partial), `source_memory_id`, `embedding (vector)`, `tags[]`, `retrieval_count`, `created_at`
-- Populated by Opus when a multi-step task completes cleanly — the agent writes *what worked*, not just *what happened*
-- Retrieved as 1–2 example prefixes before any complex task that matches by semantic similarity and task type
-
-### 1.2 Hybrid Retrieval Upgrade
-
-The memory service currently does cosine similarity search. Upgrade to a weighted combination:
+### ✅ 1.7 Hybrid Memory with MMR
+Upgrade Python memory service retrieval from pure cosine similarity to weighted hybrid with Maximal Marginal Relevance.
 
 ```
-score = (0.6 × cosine_similarity) + (0.3 × recency_decay) + (0.1 × access_frequency_bonus)
+1. Retrieve top-20 by cosine similarity
+2. Temporal decay: score *= exp(-λ * days_since_access), λ = ln(2)/30
+3. Access bonus: score += 0.1 * min(access_count/10, 1)
+4. MMR re-rank: iteratively select maximizing (relevance - 0.3 * max_similarity_to_selected)
+5. Return top-N within token budget
 ```
+- **Files**: `services/memory/`
+- **Effort: M** (3-4 hrs)
 
-- Recency decay: exponential with 30-day half-life so stale memories don't crowd out recent ones
-- Access frequency: memories retrieved repeatedly float higher (they're proving useful)
-- Tag filter as a hard pre-filter before scoring — scoped retrieval for domain-specific queries
+### ✅ 1.8 Memory Write Policy
+Auto-trigger structured memory writes on significant task completion.
 
-### 1.3 Routing Decision Logger
-
-Every routing decision — which model was chosen, why, and with what confidence — should be logged to Postgres. This data is the foundation for Phase 3's self-improvement engine.
-
-**`routing_decisions` table**
-- Fields: `id`, `session_id`, `task_type`, `model_chosen`, `rationale`, `confidence`, `input_complexity_score`, `latency_ms`, `created_at`
-- Written after every non-trivial routing call (skip logging Haiku pass-throughs for trivial tasks)
-- The routing classifier returns `{model, rationale, confidence}` — store all three
-
-### 1.4 Memory Write Policy
-
-Automatically trigger a structured memory write when a significant task completes. Currently memory is written on-demand; make it systematic.
-
-- On Sonnet/Opus task completion, a post-task hook checks: *was this notable? did it involve multiple tools? did it resolve something non-trivial?*
-- If yes, Haiku generates a structured memory entry: what was asked, what was done, what worked, any caveats
-- Domain-tag the entry (home, personal, tech, family) for scoped retrieval later
-- Entries with high importance scores feed the solution_patterns table via Opus (weekly batch)
-
-### Phase 1 Task Breakdown
-
-| Priority | Task | Effort | Depends On | Notes |
-|---|---|---|---|---|
-| P1 | `solution_patterns` table + schema migration | 1–2 hrs | — | Few-shot retrieval foundation |
-| P1 | Routing decision logger | 1–2 hrs | — | Critical dependency for Phase 3 |
-| P2 | Hybrid retrieval upgrade | 2–3 hrs | Memory service | Cosine + recency + access weighting |
-| P2 | Post-task memory write hook | 2–3 hrs | Routing logger | Auto-trigger on task complete |
-| P3 | Opus-driven solution pattern extraction | 2 hrs | Both tables | Weekly batch job, Opus-rated |
+- Post-task hook: was this notable? multiple tools? non-trivial resolution?
+- Haiku generates structured entry with domain tags
+- High-importance entries feed solution_patterns via Opus weekly batch
+- **Files**: `src/core/orchestrator.ts`, `src/skills/memory/`
+- **Effort: S-M** (2-3 hrs)
 
 ---
 
-## Phase 2 — Proactive Intelligence: Ambient Awareness
-**Timeline: Weeks 2–5 · ~18–24 hours remaining**
+## Phase 2 — New Capabilities: Browser, Permissions (~22-28 hours)
 
-This is the shift from reactive to proactive. The agent stops waiting to be asked and starts monitoring, surfacing, and alerting based on context it already has. Importantly, the infrastructure to support this (Redis Streams event bus, alert routing, n8n ingestion, scheduler) is already in place — new monitors plug into existing patterns.
+*Theme: Add the highest-impact capability (browser) and the safety layer they require.*
 
-### 2.1 Home Assistant Integration
+### 🔲 2.1 Browser Automation Skill
+Playwright in Docker containers via docker-executor. Navigate, click, fill forms, screenshot.
 
-Given your existing HA and UniFi setup this is high-value, low-effort. The `knownClients` table schema is already deployed for UniFi device tracking.
+**Tools**: `browser_navigate(url, wait_for?)`, `browser_click(selector)`, `browser_fill(selector, value)`, `browser_screenshot()`, `browser_evaluate(script)` [tier 3], `browser_session_close()`
 
-- Build an HA MCP server or n8n webhook bridge exposing: entity states, automations, history, and event bus
-- Agent can query home state as context before responding to anything location or schedule-adjacent
-- Proactive alerts: anomalous sensor readings, devices left on, energy spikes — agent decides via Sonnet whether to notify, routed through the existing alert system
-- UniFi integration: wire `knownClients` to actual UniFi polling — unknown device detection, bandwidth anomalies, offline nodes surface via morning briefing
+**Security**: Container isolation, URL allowlist/blocklist (mirrors Firecrawl), SSRF blocklist, ephemeral profiles, all URLs in audit trail.
 
-### 2.2 Context Aggregator & Morning Briefing
+```yaml
+browser:
+  enabled: false  # Explicit opt-in
+  docker_image: "mcr.microsoft.com/playwright:latest"
+  timeout_seconds: 300
+  max_concurrent_sessions: 2
+  url_blocklist: ["localhost", "127.0.0.1", "*.internal", "169.254.*"]
+```
+- **Files**: `src/skills/browser/skill.ts`
+- **Effort: L** (8-10 hrs)
+- **Depends on**: Docker executor, 1.1 (audit), 1.4 (permission tiers)
 
-Build a daily context assembly pipeline that runs on a schedule, not in response to a message. Uses the existing scheduler skill to register the cron, existing n8n events for ingestion, and existing alert routing for delivery.
+### 🔲 2.2 Telegram Interface
+Third messaging interface, mobile-first. Same pattern as Discord/Slack.
 
-- Scheduler task pulls: calendar events, weather, home state, open reminders, last 24hrs of n8n events, and HA alerts
-- Sonnet synthesizes into a prioritized briefing — not a list dump but an actual summary with suggested actions
-- Delivered via preferred channel (Discord or Slack, both already integrated)
-- The briefing itself becomes a memory entry, creating a longitudinal record of daily context
+- `telegraf` library, `orchestrator.handleMessage()` integration, file attachments
+- User allowlisting, same security model as Discord/Slack
 
-### 2.3 Ambient Monitoring Agents
-
-Persistent lightweight watchers that run on schedule (via existing scheduler) and escalate to reasoning models only when they find something interesting.
-
-- **Topic monitor** — Firecrawl + search on topics you care about; Haiku filters noise, Sonnet summarizes signal
-- **Lab health monitor** — Docker container status, Proxmox resource usage, disk space, service uptime — weekly digest (doctor skill already handles error patterns; this adds proactive digests)
-- **Plex availability watcher** — monitors watchlist, notifies when something becomes available
-
-**Significance threshold** — each monitor runs a Haiku pre-filter: *is this worth escalating?* Only escalations go to Sonnet. This keeps costs near zero for routine checks. The alert routing and suppression system already handles deduplication.
-
-### Phase 2 Task Breakdown
-
-| Priority | Task | Effort | Depends On | Notes |
-|---|---|---|---|---|
-| P1 | Home Assistant MCP/bridge | 4–6 hrs | — | HA REST API → MCP tools or n8n bridge |
-| P1 | Morning briefing pipeline | 3–4 hrs | HA bridge, scheduler | Sonnet synthesis, alert routing delivery |
-| P2 | UniFi device polling | 2 hrs | HA bridge pattern | Wire knownClients to live UniFi data |
-| P2 | Significance threshold layer | 1–2 hrs | — | Haiku pre-filter; plugs into event bus |
-| P2 | Topic monitor agent | 2–3 hrs | Firecrawl, threshold layer | Interest topics from memory |
-| P3 | Lab health monitor | 2 hrs | Scheduler, docker-executor | Digest separate from doctor's per-error alerts |
-| P3 | Plex availability watcher | 2–3 hrs | n8n or Plex API | Watchlist monitoring |
+```yaml
+telegram:
+  bot_token: ""
+  allowed_user_ids: []
+```
+- **Files**: `src/interfaces/telegram-bot.ts`
+- **Effort: S-M** (3-4 hrs)
 
 ---
 
-## Phase 3 — Self-Improvement Engine
-**Timeline: Weeks 5–9 · ~22–28 hours remaining**
+## Phase 3 — Proactive Intelligence (~18-24 hours)
 
-This is where the system starts to genuinely improve itself over time. Opus handles all reasoning in this phase. The key distinction from Phase 1's memory work: Phase 1 is about *remembering outcomes*. Phase 3 is about *reasoning about patterns across many outcomes* and changing system behavior as a result.
+*Theme: Shift from reactive to proactive. The agent monitors, surfaces, and alerts based on context it already has.*
 
-**Dependency:** Phase 3's routing intelligence upgrade requires at least 4–6 weeks of routing decision logs from Phase 1.3. Build the audit log and reflection cycle first; hold the routing upgrade until data is available.
+### 🔲 3.1 Home Assistant Integration
+HA MCP server or n8n webhook bridge. Entity states, automations, history. Proactive alerts for anomalous readings. UniFi device tracking via existing `knownClients` table.
+- **Effort: M-L** (4-6 hrs)
 
-### 3.1 Interaction Audit Log
+### 🔲 3.2 Morning Briefing Pipeline
+Daily scheduled context assembly: calendar, weather, home state, reminders, n8n events, email unread summary (will be from n8n webhook?). Sonnet synthesis into prioritized summary with suggested actions. Delivered via MessageSender (1.6).
+- **Effort: M** (3-4 hrs) | **Depends on**: 1.6, 3.1
 
-Build a structured audit log before building the improvement engine.
+### 🔲 3.3 Ambient Monitoring Agents
+Lightweight scheduled watchers with Haiku significance pre-filter:
+- Topic monitor (Firecrawl + search on interest topics)
+- Lab health monitor (Docker, Proxmox, disk space — weekly digest)
+- Plex availability watcher
+- **Effort: M** (4-6 hrs per monitor)
 
-- Log every interaction: input, model used, tools called, tool success/fail, output, routing decision (join with `routing_decisions`), response time
-- Add a lightweight self-assessment step after each Sonnet/Opus response: was this task completed? Did any tool fail? Was a fallback needed?
-- Store in Postgres with enough structure to query: *"show me all tasks where tool X failed"* or *"what request types most often escalate from Haiku to Sonnet"*
+### 🔲 3.4 Workspace Routing
+Different channels route to different agent configurations (tools, system prompt, memory tags).
 
-### 3.2 Weekly Reflection Cycle — Opus
-
-A scheduled weekly task where Opus reads the audit log and produces structured improvement recommendations.
-
-**Input to Opus:** last 7 days of audit log, current system prompt, current tool list, memory retrieval hit rates, routing decision outcomes
-
-**Opus produces a structured report covering:**
-- Recurring failure modes with root cause hypotheses
-- Tasks where model was over/under-qualified
-- Memory retrieval misses — queries that should have hit memory but didn't
-- Capability gaps — tasks that required tool fallback or apology
-- Proposed prompt improvements with before/after diffs
-
-All recommendations require your explicit approval before deployment — agent proposes, you decide.
-
-### 3.3 Prompt Evolution System
-
-The system prompt is the agent's DNA. Make it evolvable.
-
-- Version control all prompt changes in Postgres with timestamp, author (you or Opus-proposed), and rationale
-- A/B test prompt variants on low-stakes tasks before promoting to production
-- Opus rewrites specific *sections* rather than the whole prompt — targeted improvements are safer and easier to review
-- Rollback is trivially easy — any version can be restored from the log
-
-### 3.4 Routing Intelligence Upgrade
-
-Use the accumulated routing log from Phase 1.3 to make smarter routing decisions.
-
-- After 6+ weeks of logged routing decisions and outcomes, Opus analyzes: which task types were systematically mis-routed?
-- Update routing classifier with learned task-type signatures based on actual outcome data
-- Add confidence scoring: low-confidence Haiku responses auto-escalate rather than returning uncertain answers
-
-### Phase 3 Task Breakdown
-
-| Priority | Task | Effort | Depends On | Notes |
-|---|---|---|---|---|
-| P1 | Interaction audit log schema | 2–3 hrs | Phase 1 routing logger | Foundation for all self-improvement |
-| P1 | Self-assessment post-task | 3 hrs | Audit log | Haiku self-scores each response |
-| P1 | Weekly Opus reflection job | 4–5 hrs | Audit log + self-assessment | Core learning mechanism |
-| P2 | Prompt version control | 2 hrs | Audit log | Postgres-backed, rollback-ready |
-| P2 | Proposed change approval flow | 2–3 hrs | Reflection job | Human-in-loop gate |
-| P2 | Routing upgrade from log data | 3 hrs | 6+ weeks routing data | Data-driven; hold until data is mature |
-| P3 | Prompt A/B testing framework | 4 hrs | Prompt versioning | Safe staged rollout |
+```yaml
+workspaces:
+  home:
+    channels: ["discord:12345", "telegram:67890"]
+    allowed_skills: ["reminders", "notes", "memory", "weather", "gmail"]
+    memory_tags: ["home", "family"]
+  lab:
+    channels: ["discord:54321"]
+    allowed_skills: ["notes", "memory", "docker-executor", "subagents", "mcp", "browser"]
+    memory_tags: ["tech", "homelab"]
+```
+- Orchestrator `handleMessage()` resolves workspace before building prompt/tools
+- Uses existing `getToolDefinitions({ allowedSkills, blockedTools })`
+- **Files**: `src/core/workspace.ts`, `src/core/orchestrator.ts`
+- **Effort: M** (4-6 hrs) | **Depends on**: 1.1
 
 ---
 
-## Phase 4 — Multi-Agent Architecture
-**Timeline: Weeks 9–14 · ~14–20 hours remaining**
+## Phase 4 — Self-Improvement Engine (~22-28 hours) ✅
 
-The subagent system already exists: isolated sessions, concurrency limits, async/sync modes, parent/child tracking, and full transcript persistence in `subagentRuns`. This phase formalizes the IO contract between orchestrator and workers, and builds specialist configurations on top of the existing infrastructure — not from scratch.
+*Theme: The system starts reasoning about its own patterns and improving itself. Requires weeks of audit data from Phase 1.*
 
-### 4.1 Orchestrator / Worker Contract
+### ✅ 4.1 Self-Assessment Post-Task
+Lightweight Haiku self-score after each Sonnet/Opus response: task completed? tool failures? fallbacks needed?
 
-The current subagent system accepts free-text tasks and returns free-text results. Formalize with structured schemas so orchestrators can reliably parse worker outputs.
+**Implemented:**
+- `SelfAssessmentService` (`src/core/self-assessment.ts`) — fire-and-forget Haiku scoring
+- Writes to `self_assessments` table (correlation_id, score 1-5, task_completed, failure_modes)
+- Post-task hook in `orchestrator.handleMessageInner()` for all tool-using turns (toolCallCount ≥ 1)
+- **Effort: M** (3 hrs)
 
-- Define a typed IO envelope: `{task_type, input_schema, output_schema, allowed_tools[], timeout_ms}`
-- Workers write structured results to Redis for the orchestrator to collect and synthesize
-- Orchestrator (Sonnet) handles all user-facing interaction; workers (Haiku or specialist) execute subtasks
-- This is a thin layer on top of existing `sessions_spawn` — mainly schema enforcement and output parsing
+### ✅ 4.2 Weekly Opus Reflection Cycle
+Scheduled weekly: Opus reads audit log, produces structured improvement recommendations. All changes require explicit user approval.
 
-### 4.2 Specialist Agent Library
+**Implemented:**
+- `SelfImprovementSkill` (`src/skills/self-improvement/`) — weekly_reflection cron (Sunday 3 AM)
+- Input assembly: 7-day audit stats, low-scoring assessments, routing patterns, system prompt snapshot, tool list
+- Output: up to 10 structured proposals in `improvement_proposals` table
+- Summary sent to approval channel; `improvement_proposals_list` + `improvement_proposal_decide` tools
+- **Effort: L** (4-5 hrs) | **Depends on**: 1.1 (weeks of data)
 
-Build a small library of pre-configured specialist agents, each with a focused system prompt and limited tool access. These use the existing `allowed_tools` / `blocked_tools` fields in `subagentRuns`.
+### ✅ 4.3 Prompt Evolution System
+Version-controlled system prompts in Postgres. Opus rewrites sections, not whole prompts. A/B testing on light-tier tasks. Instant rollback.
 
-- **Home agent** — HA, UniFi, calendar only. Answers anything home/family related.
-- **Research agent** — Firecrawl, web search, memory. Handles any "find out about X" task.
-- **Lab agent** — docker-executor, system info, Proxmox. Handles infrastructure tasks.
-- **Planner agent** — reminders, notes, scheduler. Handles time and task management.
+**Implemented:**
+- `PromptManager` (`src/core/prompt-manager.ts`) — getSection, createVersion, activateVersion, rollback, recordPerformance
+- `prompt_versions` table (section_name, version, is_active, is_ab_variant, ab_weight, performance_score)
+- `buildSystemPrompt()` checks DB-backed sections first; falls back to hardcoded text
+- A/B variant selection on light-tier requests based on ab_weight
+- `prompt_rollback` tool on SelfImprovementSkill (tier 3, requires confirmation)
+- `prompt_evolution_enabled: false` by default — explicit opt-in
+- **Effort: M** (4 hrs) | **Depends on**: 4.2
 
-Specialist configs are stored as named presets — orchestrator picks the right specialist by task type.
+### ✅ 4.4 Routing Intelligence Upgrade
+Use routing decision logs to update classifier with learned task-type signatures.
 
-### 4.3 Critique Loop
+**Implemented:**
+- `LearnedTierClassifier` (`src/core/learned-classifier.ts`) — retrain from routing_decisions + self_assessments
+- Keyword pattern extraction from misrouted turns (light+low score → should be heavy; heavy+high score → could be light)
+- `TierClassifier.setLearnedClassifier()` — integrates learned patterns before static heuristics (confidence threshold: 0.7)
+- Weekly retrain cron (Sunday 4 AM) via `routing.retrain` scheduled task
+- **Effort: M** (3 hrs) | **Depends on**: 1.3
 
-For high-stakes outputs (anything resulting in a real-world action), add a critic pass before execution.
+### ✅ 4.5 Long-Horizon Task Execution (accelerated from Phase 5)
+Persistent multi-day tasks with checkpointing, autonomous resumption, blocker surfacing.
 
-- After orchestrator produces a plan, a second Haiku instance reviews with a critic prompt
-- Critic checks: is this safe? Does it match what was asked? Are there side effects? Is there a simpler approach?
-- Orchestrator sees critique and either confirms or revises before acting
-- Log critique outcomes in the audit log — feeds Phase 3 reflection
-
-### Phase 4 Task Breakdown
-
-| Priority | Task | Effort | Depends On | Notes |
-|---|---|---|---|---|
-| P1 | Orchestrator/worker IO contract | 2–3 hrs | Phase 3 stable | Structured schemas on existing subagents |
-| P1 | Home specialist agent config | 2–3 hrs | Phase 2 HA integration | HA + UniFi + calendar allowed_tools preset |
-| P2 | Research specialist agent config | 1–2 hrs | Worker contract | Firecrawl + memory + web preset |
-| P2 | Lab specialist agent config | 1–2 hrs | Worker contract | Docker + scheduler preset |
-| P2 | Critique loop for actions | 3–4 hrs | Orchestrator split | Haiku critic on real-world actions |
-| P3 | Planner specialist agent config | 1–2 hrs | Worker contract | Reminders + notes + scheduler preset |
-| P3 | Critique outcome logging | 1 hr | Critique loop + audit log | Feeds Phase 3 reflection |
+**Implemented:**
+- `task_state` table: `id, user_id, channel, workspace_id, goal, steps (jsonb), current_step, status, blockers (jsonb), next_action_at, result, metadata, created_at, updated_at`
+- `TaskExecutionSkill` (`src/skills/tasks/`) — Tools: `task_create`, `task_status`, `task_advance`, `task_block`
+- `task_resume` cron (every 15 min) — notifies user when next_action_at arrives
+- **Effort: L** (6-8 hrs) | **Depends on**: 1.1, 1.6
 
 ---
 
-## Phase 5 — Autonomy & Closed-Loop Improvement
-**Timeline: Months 4–6+ · ~23–31 hours remaining**
+## Phase 5 — Multi-Agent & Ecosystem (~24-32 hours)
 
-Phase 5 is never fully "done" — it's the ongoing operating mode once the previous phases are stable. The system can now identify its own capability gaps, propose new tools, and execute long-horizon tasks without step-by-step guidance. Your role shifts from operator to approver.
+*Theme: Specialist agents, self-critique, autonomous growth, and ecosystem extensibility.*
 
-### 5.1 Gap Detection & Skill Proposal
+### 🔲 5.1 Orchestrator/Worker IO Contract
+Typed IO envelopes for subagent tasks. Thin layer on existing `sessions_spawn`.
+- **Effort: S-M** (2-3 hrs)
 
-The reflection cycle from Phase 3 already identifies gaps. Phase 5 closes the loop by having the agent propose solutions, not just problems.
+### 🔲 5.2 Specialist Agent Library
+Pre-configured specialist presets: Home agent, Research agent, Lab agent, Planner agent. Each with focused system prompt + tool allowlist.
+- **Effort: M** (6-8 hrs total)
 
-- Opus monthly review: reads 30 days of audit logs, identifies the top 3 capability gaps by frequency and impact
-- For each gap, Opus produces a structured proposal: what capability is missing, what tool/integration would address it, estimated build effort, and a draft spec
-- Proposals are queued for your review — you approve, reject, or defer
-- Approved proposals get executed using docker-executor and skill-creator (already deployed) to build and test the new capability
+### 🔲 5.3 Critique Loop
+Haiku critic reviews high-stakes outputs before execution. Checks safety, accuracy, side effects, simplicity. Critique outcomes logged to audit.
+- **Effort: M** (3-4 hrs)
 
-### 5.2 Long-Horizon Task Execution
+### 🔲 5.4 Gap Detection & Skill Proposal
+Monthly Opus review: 30 days of audit → top 3 capability gaps → structured proposals. User approves/rejects. Approved proposals built via docker-executor + skill-creator.
+- **Effort: L** (4-5 hrs)
 
-Enable multi-day tasks that the agent works on autonomously, checkpointing progress and resuming without you re-initiating.
+### 🔲 5.5 Expose Coda as MCP Server
+Expose subset of coda's tools as an MCP server (stdio transport) for IDE integration.
 
-- Task state stored in Postgres: goal, steps completed, current step, blockers, next action
-- Scheduled executor checks for in-progress tasks and advances them if unblocked
-- Agent surfaces blockers when human input is needed — otherwise works independently
-- Examples: *"Research and summarize the best self-hosted alternatives to X over the next week"*, *"Monitor home energy usage for 2 weeks and produce a report"*
+- Reuses `src/integrations/mcp/schema-mapper.ts` in reverse
+- Exposed tools: notes, memory, reminders, subagent delegation (configurable allowlist)
+- **Files**: `src/interfaces/mcp-server.ts`
+- **Effort: M** (4-5 hrs)
 
-### 5.3 Permission Tier System
+### 🔲 5.6 Skill Discovery Registry
+Curated JSON catalog of available agent skills. Agent searches it and proposes installations.
 
-As autonomy increases, explicit permission scoping becomes critical. This is the safety layer that makes everything else viable.
+- `skill_registry_search(query)` tool, JSON fetched via HTTPS + Redis cache
+- Installation = download SKILL.md to `agent_skill_dirs` + existing `/rescan-skills`
+- Unsigned skills require explicit user approval
+- **Effort: S-M** (3-4 hrs)
 
-| Tier | Scope | Behavior |
-|---|---|---|
-| **0** | Read only | Always permitted: memory retrieval, sensor reads, web search, calendar view |
-| **1** | Write to personal data | Soft confirmation unless pre-approved pattern: reminders, notes, memory updates |
-| **2** | External action | Always requires explicit confirmation: sending messages, creating events, modifying files |
-| **3** | Infrastructure change | Approval + audit log entry: deploying containers, modifying system prompts, installing skills |
-| **4** | Irreversible | Confirmation + 5-minute delay: deleting data, external API calls with side effects |
+### 🔲 5.7 Synthetic Few-Shot Library
+Monthly Opus harvests best interactions from audit log into `solution_patterns` table. 2-3 most relevant examples surfaced as context prefix for new tasks.
+- **Effort: S-M** (3 hrs) | **Depends on**: 1.2, 4.2
 
-> This is worth thinking about from Phase 2 onward, even if you don't enforce it strictly until Phase 5. Having the mental model in place early will shape better design decisions throughout.
+---
 
-### 5.4 Synthetic Few-Shot Library (Compounding)
+## Implementation Progress
 
-By this phase you have months of audit log data. Systematically harvest the best examples into a few-shot library.
-
-- Opus monthly: scans audit log for highly-rated interactions (by self-assessment), extracts as structured examples
-- Examples are tagged by task type and stored in the `solution_patterns` table from Phase 1
-- Retrieval layer surfaces the 2–3 most relevant examples as context prefix for any new task
-- The agent effectively shows itself how it solved similar things before — the closest approximation to fine-tuning without actually training
-
-### Phase 5 Task Breakdown
-
-| Priority | Task | Effort | Depends On | Notes |
+| # | Item | Status | Effort | Unlocks |
 |---|---|---|---|---|
-| P1 | Permission tier enforcement | 4–6 hrs | Phase 4 stable | Non-negotiable safety layer |
-| P1 | Long-horizon task state store | 3–4 hrs | Phase 4 orchestrator | Postgres task state schema |
-| P1 | Gap proposal pipeline | 4–5 hrs | Phase 3 reflection | Opus proposes, you approve |
-| P2 | Proposal execution engine | 4–5 hrs | Gap proposals, docker-executor | Agent builds its own tools |
-| P2 | Synthetic few-shot harvester | 3 hrs | Audit log (months of data) | Monthly Opus job |
-| P3 | Long-horizon task executor | 3–4 hrs | Task state store | Scheduled autonomous advancement |
-| P3 | Monthly capability review | 2 hrs | All Phase 5 components | Ongoing operating cadence |
+| 1 | Audit system | ✅ Done | M | Everything |
+| 2 | Solution pattern store (table) | ✅ Done | S | Few-shot retrieval |
+| 3 | Routing decision logger | ✅ Done | S | Phase 4 routing upgrade |
+| 4 | Permission tier system | ✅ Done | M | Browser safety |
+| 5 | Config hot-reload | ✅ Done | S | Daily QoL |
+| 6 | Message sender | ✅ Done | S | All proactive features |
+| 7 | Hybrid memory MMR | ✅ Done | M | Better retrieval |
+| 8 | Memory write policy | ✅ Done | S-M | Systematic learning |
+| 9 | Browser automation | 🔲 Todo | L | Web interaction |
+| 10 | Telegram | 🔲 Todo | S-M | Mobile interface |
+| 11 | HA integration | 🔲 Todo | M-L | Home awareness |
+| 12 | Morning briefing | 🔲 Todo | M | Daily proactive summary |
+| 13 | Workspace routing | 🔲 Todo | M | Channel isolation |
+| 14 | Ambient monitors | 🔲 Todo | M | Topic/lab/Plex watching |
+| 15 | Self-assessment | ✅ Done | M | Reflection data |
+| 16 | Opus reflection | ✅ Done | L | Self-improvement |
+| 17 | Prompt evolution | ✅ Done | M | Evolving prompts |
+| 17b | Routing intelligence | ✅ Done | M | Learned routing |
+| 18 | Long-horizon tasks | ✅ Done | L | Multi-day autonomy |
+| 19 | Specialist agents | 🔲 Todo | M | Parallel work |
+| 20 | Critique loop | 🔲 Todo | M | Self-validation |
+| 21 | MCP server (expose coda) | 🔲 Todo | M | IDE integration |
+| 22 | Skill registry | 🔲 Todo | S-M | Ecosystem growth |
+| 23 | Gap detection | 🔲 Todo | L | Autonomous growth |
 
 ---
 
 ## Ideas Backlog
 
-Items captured from research and brainstorming that don't fit cleanly into the current phase roadmap. Review when planning Phase 5 gap proposals.
+Items captured from research and brainstorming that don't fit cleanly into the current phase roadmap.
 
 ### Browser Automation (Playwright/Puppeteer)
 Firecrawl handles reading but not interaction. A Playwright integration would enable:
@@ -382,8 +345,8 @@ Firecrawl handles reading but not interaction. A Playwright integration would en
 
 ### Plex Integrations
 - **Spoiler-free companion** — query current playback timestamp before answering questions about a show/film
-- **Semantic library search** — ingest Plex titles/plot summaries/subtitle text into vector memory; find episodes by meaning ("the one where Dwight starts a fire")
-- **Smart recommender** — suggestions based on family viewing history, mood, and who's watching (Tautulli integration)
+- **Semantic library search** — ingest Plex titles/plot summaries/subtitle text into vector memory
+- **Smart recommender** — suggestions based on family viewing history, mood, and who's watching
 
 ### Additional Skills/Integrations
 - **Stock/portfolio checker** — price alerts, position summaries
@@ -399,13 +362,9 @@ Firecrawl handles reading but not interaction. A Playwright integration would en
 
 ## Key Principles
 
-- **The system learns — the model doesn't.** Every improvement you make is to the scaffolding, memory, and routing. Accept this and you'll stop fighting the constraint.
+- **The system learns — the model doesn't.** Every improvement is to the scaffolding, memory, and routing.
 - **Opus is expensive and brilliant** — use it only for things that shape the system's future behavior, never for routine tasks.
-- **Approval gates are features, not friction.** Every Opus-proposed change going through your review is also training signal for what you actually want.
-- **Build for rollback first.** Any component that can change the system's behavior should be versioned and instantly reversible.
-- **The few-shot library compounds.** After 6 months of logging, the agent effectively has a custom knowledge base of how you like things done. This is the closest you'll get to fine-tuning without fine-tuning.
+- **Approval gates are features, not friction.** Every Opus-proposed change going through your review is also training signal.
+- **Build for rollback first.** Any component that can change behavior should be versioned and instantly reversible.
+- **The few-shot library compounds.** After 6 months of logging, the agent effectively has a custom knowledge base of how you like things done.
 - **Leverage what exists.** The foundation is built. Before adding a new table, service, or abstraction, check whether the existing event bus, alert routing, scheduler, or subagent system already provides 80% of what's needed.
-
----
-
-*Total estimated remaining work: ~87–115 hours across Phases 1–5, spread over 4–6 months. Foundation is deployed and operational. Phase 1 delivers immediate improvements to memory quality and makes routing behavior visible. Each subsequent phase makes the previous investment more valuable.*

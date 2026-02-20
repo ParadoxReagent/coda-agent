@@ -79,6 +79,82 @@ scheduler:
       enabled: true
 ```
 
+### Audit
+
+Read-only agent self-introspection into the persistent audit log. Allows the agent to query its own tool call history, identify failure patterns, and surface usage statistics without direct DB access.
+
+| Tool | Description |
+|------|-------------|
+| `audit_query` | Query recent tool calls filtered by tool, skill, status, or time window |
+| `audit_stats` | Aggregate statistics: total calls, success rate, top tools, errors by tool |
+
+Both tools are `mainAgentOnly` — not available to subagents.
+
+> **Data foundation**: The audit log records every tool call to `audit_log` in Postgres. This data powers Phase 4's weekly Opus reflection cycle and self-improvement engine.
+
+### Tasks (Long-Horizon Execution)
+
+Persistent multi-day task tracking with checkpointing and auto-resumption. Tasks survive restarts and can span multiple days with scheduled action points.
+
+| Tool | Description |
+|------|-------------|
+| `task_create` | Create a persistent task with an ordered list of steps and optional schedule |
+| `task_status` | Get status of a specific task, or list all active tasks for the current user |
+| `task_advance` | Mark the current step complete and advance to the next step |
+| `task_block` | Mark a task as blocked, recording the blocker reason and type |
+
+**Scheduled resumption**: A cron job (default: every 15 minutes) checks for tasks whose `next_action_at` has arrived and notifies the user via the configured messaging channel.
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+tasks:
+  enabled: true
+  resume_cron: "*/15 * * * *"   # How often to check for resumable tasks
+  max_active_per_user: 5         # Max concurrent active tasks per user
+  max_auto_resume_attempts: 3    # Max times a task auto-resumes without user input
+```
+
+### Self-Improvement
+
+Weekly Opus-powered reflection cycle that analyzes performance data and generates structured improvement proposals. Supports version-controlled prompt evolution with A/B testing.
+
+All tools are `mainAgentOnly` and require user confirmation for write operations.
+
+| Tool | Description |
+|------|-------------|
+| `improvement_proposals_list` | List improvement proposals (filter by status: pending/approved/rejected/applied/all) |
+| `improvement_proposal_decide` | Approve or reject a proposal (tier 3, requires confirmation) |
+| `improvement_trigger_reflection` | Manually trigger a reflection cycle immediately (tier 3, requires confirmation) |
+| `prompt_rollback` | Roll back a prompt section to its previous version (tier 3, requires confirmation) |
+
+**How it works:**
+1. Every Sunday at 3 AM (configurable), an Opus reflection cycle runs
+2. It analyzes: audit stats, low-scoring self-assessments, routing patterns, current system prompt, and tool list
+3. Opus generates up to 10 structured proposals with category, title, description, priority, and optional prompt diff
+4. Proposals are inserted to `improvement_proposals` with `status: pending`
+5. A summary is sent to the configured approval channel
+6. The user reviews via `improvement_proposals_list` and decides via `improvement_proposal_decide`
+7. Approved `prompt` proposals with a diff are automatically applied to `prompt_versions` when `prompt_evolution_enabled: true`
+
+**Self-assessment** (4.1): After each tool-using turn, Haiku scores the interaction 1-5 and records failure modes to `self_assessments`. This data feeds the weekly reflection cycle.
+
+**Learned routing** (4.4): A separate cron (default Sunday 4 AM) retrains the `LearnedTierClassifier` from routing decisions + self-assessment scores, improving tier classification over time.
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+self_improvement:
+  enabled: true
+  opus_model: "claude-opus-4-6"          # Optional: override Opus model
+  reflection_cron: "0 3 * * 0"          # Sunday 3 AM
+  assessment_enabled: true               # Post-turn self-scoring
+  prompt_evolution_enabled: false        # Auto-apply approved prompt proposals
+  max_reflection_input_tokens: 8000      # Max tokens sent to Opus
+  approval_channel: "discord"            # Where to send proposal summaries
+  routing_retrain_cron: "0 4 * * 0"     # Sunday 4 AM
+```
+
 ### Docker Executor
 
 Provides sandboxed code execution in ephemeral Docker containers. Enables agent skills (like PDF processing) to run code safely with strict resource limits and isolation.
