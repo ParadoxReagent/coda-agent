@@ -9,6 +9,15 @@ llm:
       models:
         - "claude-sonnet-4-5-20250514"
         - "claude-haiku-3-5-20241022"
+  # Tier routing — use a cheaper model for simple requests, expensive for complex ones
+  tiers:
+    enabled: false
+    light:
+      provider: "anthropic"
+      model: "claude-haiku-3-5-20241022"
+    heavy:
+      provider: "anthropic"
+      model: "claude-sonnet-4-5-20250514"
 
 discord:
   bot_token: ""       # or DISCORD_BOT_TOKEN
@@ -44,11 +53,6 @@ weather: {}         # Free NWS API, no key needed
 #   MEMORY_API_KEY           → semantic memory
 #   EXECUTION_ENABLED=true   → Docker code execution
 #   SLACK_APP_TOKEN + SLACK_BOT_TOKEN → Slack interface
-#
-# Tier routing (cost optimization):
-#   TIER_ENABLED=true
-#   TIER_LIGHT_MODEL=claude-haiku-3-5-20241022
-#   TIER_HEAVY_MODEL=claude-sonnet-4-5-20250514
 #
 # Uncomment sections below to customize defaults:
 

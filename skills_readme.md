@@ -308,9 +308,11 @@ Specialist agents are domain-focused sub-agents defined entirely by files in `sr
 | Agent | Token budget | Focus |
 |-------|-------------|-------|
 | `home` | 30 000 | Reminders, notes, weather, personal organisation |
-| `research` | 80 000 | Web scraping, search, synthesis, source citation |
+| `research` | 80 000 | Web scraping, search, synthesis, source citation; browser tools available for JS-heavy pages |
 | `lab` | 100 000 | Code execution, debugging, technical research |
 | `planner` | 40 000 | Task decomposition, scheduling, dependency analysis |
+
+The `research` agent has access to both Firecrawl (fast, read-only scraping) and browser tools (`browser_open`, `browser_navigate`, `browser_screenshot`, `browser_get_content`, `browser_click`, `browser_close`) for pages that require JavaScript rendering, click interactions, or pagination. `browser_type` and `browser_evaluate` are excluded — the research agent does not handle credentials or arbitrary JS execution.
 
 ---
 
