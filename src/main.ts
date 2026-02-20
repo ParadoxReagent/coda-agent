@@ -46,6 +46,7 @@ import { AuditService } from "./core/audit.js";
 import { AuditSkill } from "./skills/audit/skill.js";
 import { RoutingDecisionLogger } from "./core/routing-logger.js";
 import { ConfigWatcher } from "./utils/config-watcher.js";
+import { initAgentLoader } from "./core/agent-loader.js";
 import { MessageSender } from "./core/message-sender.js";
 import { SelfAssessmentService } from "./core/self-assessment.js";
 import { PromptManager } from "./core/prompt-manager.js";
@@ -135,6 +136,9 @@ async function main() {
   } catch {
     // Ignore URL parse errors (already validated by config schema)
   }
+
+  // 3b. Initialize specialist agent loader (must happen before skill registry)
+  await initAgentLoader(logger);
 
   // 4. Initialize core services
   const skillHealthTracker = new SkillHealthTracker();
@@ -320,6 +324,19 @@ async function main() {
     }
   } else {
     logger.info("Docker executor disabled (execution.enabled: false)");
+  }
+
+  // 7d. Browser Automation Skill (Playwright MCP in ephemeral Docker sandbox)
+  if (config.browser?.enabled) {
+    try {
+      const { BrowserSkill } = await import("./skills/browser/skill.js");
+      skillRegistry.register(new BrowserSkill(config.browser, logger));
+      logger.info("Browser automation skill registered");
+    } catch (err) {
+      logger.warn({ error: err }, "Browser automation skill not registered");
+    }
+  } else {
+    logger.info("Browser automation disabled (browser.enabled: false)");
   }
 
   // 8. Create orchestrator with optional tier classifier

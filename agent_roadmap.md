@@ -16,6 +16,7 @@
 | **Agent Skills** | web-research, pdf, skill-creator, algorithmic-art, mcp-builder, slack-gif-creator, frontend-design (7 total) |
 | **Integrations** | MCP (stdio + HTTP), n8n, Firecrawl, Weather, Discord, Slack (6 total) |
 | **New (Phase 1)** | Audit log, solution_patterns table, routing_decisions table, permission tiers, config hot-reload, MessageSender |
+| **New (Phase 2)** | Browser automation (Playwright MCP in Docker sandbox), SSRF protection, callToolRaw on McpClientWrapper |
 | **New (Phase 4)** | Self-assessments, improvement_proposals, prompt_versions, task_state tables; SelfImprovementSkill, TaskExecutionSkill, PromptManager, LearnedTierClassifier, SelfAssessmentService |
 
 ---
@@ -129,24 +130,20 @@ Auto-trigger structured memory writes on significant task completion.
 
 *Theme: Add the highest-impact capability (browser) and the safety layer they require.*
 
-### 🔲 2.1 Browser Automation Skill
-Playwright in Docker containers via docker-executor. Navigate, click, fill forms, screenshot.
+### ✅ 2.1 Browser Automation Skill
+Playwright MCP in ephemeral Docker containers (stdio transport via McpClientWrapper). Navigate, click, fill forms, screenshot — with layered security isolation.
 
-**Tools**: `browser_navigate(url, wait_for?)`, `browser_click(selector)`, `browser_fill(selector, value)`, `browser_screenshot()`, `browser_evaluate(script)` [tier 3], `browser_session_close()`
+**Implemented:**
+- `BrowserService` (`src/skills/browser/service.ts`): container lifecycle + MCP client management, idle timeout monitor (30s polling), max-session enforcement
+- `BrowserSkill` (`src/skills/browser/skill.ts`): 8 tools with permission tiers, SSRF URL validation, screenshot→file conversion
+- `src/skills/browser/Dockerfile`: `mcr.microsoft.com/playwright` base + `@playwright/mcp` installed, non-root `browser` user
+- `BrowserConfigSchema` added to `config.ts`; env overrides `BROWSER_ENABLED`, `BROWSER_IMAGE`
+- `coda-browser-sandbox` Docker network added to `docker-compose.yml` (`internal: false`)
+- `callToolRaw` added to `McpClientWrapper` for binary image content handling
+- Rate limit: 20 browser tool calls / hour
+- `src/skills/browser/{Dockerfile,types.ts,service.ts,skill.ts,index.ts}`
 
-**Security**: Container isolation, URL allowlist/blocklist (mirrors Firecrawl), SSRF blocklist, ephemeral profiles, all URLs in audit trail.
-
-```yaml
-browser:
-  enabled: false  # Explicit opt-in
-  docker_image: "mcr.microsoft.com/playwright:latest"
-  timeout_seconds: 300
-  max_concurrent_sessions: 2
-  url_blocklist: ["localhost", "127.0.0.1", "*.internal", "169.254.*"]
-```
-- **Files**: `src/skills/browser/skill.ts`
-- **Effort: L** (8-10 hrs)
-- **Depends on**: Docker executor, 1.1 (audit), 1.4 (permission tiers)
+**Security layers**: `coda-browser-sandbox` network (no `coda-internal` access) · private IP blocklist (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x) · `--cap-drop=ALL` · `--read-only` + tmpfs · `--no-new-privileges` · 1g/1CPU/512PID · `--rm` ephemeral · audit logged · critique on navigate
 
 ### 🔲 2.2 Telegram Interface
 Third messaging interface, mobile-first. Same pattern as Discord/Slack.
@@ -288,6 +285,15 @@ Pre-configured specialist presets: Home agent, Research agent, Lab agent, Planne
 - System prompt section added to orchestrator; `config/config.example.yaml` documented
 - **Effort: M** (6-8 hrs total)
 
+**Refactored (directory-based agents):**
+- Replaced hardcoded TypeScript presets with modular `src/agents/{name}/` directories
+- Each agent: `soul.md` (system prompt), `tools.md` (allowlist), `config.yaml` (model/budget/description), optional `references/`
+- `AgentLoader` class in `src/core/agent-loader.ts`: scans on startup, validates, supports hot-rescan
+- `initAgentLoader()` called in `main.ts`; backward-compatible `resolvePreset()`/`getPresetNames()` free functions
+- `DelegateSyncOptions` extended with `preferredModel`, `preferredProvider`, `maxToolCalls` — wired in `delegateSync()`
+- `token_budget` + `max_tool_calls` added to `SpecialistPresetOverrideSchema`
+- New agents added by dropping a directory — no TypeScript needed
+
 ### ✅ 5.3 Critique Loop
 Haiku critic reviews high-stakes outputs before execution. Checks safety, accuracy, side effects, simplicity. Critique outcomes logged to audit.
 
@@ -328,8 +334,17 @@ Curated JSON catalog of available agent skills. Agent searches it and proposes i
 - Unsigned skills require explicit user approval
 - **Effort: S-M** (3-4 hrs)
 
-### 🔲 5.7 Synthetic Few-Shot Library
+### ✅ 5.7 Synthetic Few-Shot Library
 Monthly Opus harvests best interactions from audit log into `solution_patterns` table. 2-3 most relevant examples surfaced as context prefix for new tasks.
+
+**Implemented:**
+- `FewShotService` (`src/core/few-shot-service.ts`) — harvest + retrieval
+- Harvest: queries `self_assessments` (score ≥ 4, tool_calls ≥ 2, last 30 days), fetches `audit_log` tool sequences by correlationId, batches to Opus for pattern extraction, inserts into `solution_patterns`; marks harvested assessments via metadata
+- Retrieval: keyword-based similarity scoring against `solution_patterns`; formatted as `<example>` blocks; `retrieval_count` incremented
+- Injected into `buildSystemPrompt()` as `fewShotSection` before memory instructions
+- `few_shot_harvest_trigger` tool (tier 3, mainAgentOnly) + monthly cron (`0 4 1 * *`) in SelfImprovementSkill
+- Migration `0004_add_solution_patterns_embedding_index.sql`: HNSW index on `solution_patterns.embedding` for future vector search
+- Config: `few_shot_enabled`, `few_shot_harvest_cron`, `few_shot_min_score`, `few_shot_min_tool_calls` under `self_improvement`
 - **Effort: S-M** (3 hrs) | **Depends on**: 1.2, 4.2
 
 ---
@@ -357,11 +372,13 @@ Monthly Opus harvests best interactions from audit log into `solution_patterns` 
 | 17 | Prompt evolution | ✅ Done | M | Evolving prompts |
 | 17b | Routing intelligence | ✅ Done | M | Learned routing |
 | 18 | Long-horizon tasks | ✅ Done | L | Multi-day autonomy |
-| 19 | Specialist agents | 🔲 Todo | M | Parallel work |
-| 20 | Critique loop | 🔲 Todo | M | Self-validation |
+| 19 | Specialist agents (5.2) | ✅ Done | M | Domain-focused delegation |
+| 19b | IO contract (5.1) | ✅ Done | S-M | Typed subagent envelopes |
+| 20 | Critique loop (5.3) | ✅ Done | M | Pre-execution safety review |
 | 21 | MCP server (expose coda) | 🔲 Todo | M | IDE integration |
 | 22 | Skill registry | 🔲 Todo | S-M | Ecosystem growth |
-| 23 | Gap detection | 🔲 Todo | L | Autonomous growth |
+| 23 | Gap detection (5.4) | ✅ Done | L | Monthly capability analysis |
+| 24 | Few-shot library (5.7) | ✅ Done | S-M | Pattern-based context |
 
 ---
 

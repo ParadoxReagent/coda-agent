@@ -20,6 +20,7 @@ const DEFAULT_SKILL_RATE_LIMITS: Record<string, { maxRequests: number; windowSec
   memory: { maxRequests: 100, windowSeconds: 3600 },
   firecrawl: { maxRequests: 30, windowSeconds: 60 },
   weather: { maxRequests: 60, windowSeconds: 3600 },
+  browser: { maxRequests: 20, windowSeconds: 3600 },
 };
 
 export class SkillRegistry {

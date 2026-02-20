@@ -251,6 +251,14 @@ echo -e "${BLUE}🚀 Building and starting containers...${NC}"
 echo -e "${YELLOW}This may take a few minutes on first run...${NC}"
 echo ""
 
+# Build MCP server images and sandbox images (context7, browser-sandbox, etc.)
+# These are separate from the main app image and only need to be rebuilt when
+# their Dockerfiles change. Docker layer caching keeps this fast on repeat runs.
+echo -e "${YELLOW}Building MCP/sandbox images (profile: mcp-build)...${NC}"
+docker compose --profile mcp-build build
+echo -e "${GREEN}✓ MCP/sandbox images built${NC}"
+echo ""
+
 docker compose up --build -d
 
 # 8. Wait for health check

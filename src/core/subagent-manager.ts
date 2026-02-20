@@ -70,6 +70,9 @@ export interface DelegateSyncOptions {
   workerName?: string;
   workerInstructions?: string;
   tokenBudget?: number;
+  preferredModel?: string;
+  preferredProvider?: string;
+  maxToolCalls?: number;
   envelope?: SubagentEnvelope;
 }
 
@@ -228,10 +231,24 @@ export class SubagentManager {
     const runId = options.envelope?.taskId ?? crypto.randomUUID();
     const abortController = new AbortController();
 
-    // Get provider/model for user (use heavy tier if tiers are enabled)
-    const { provider, model } = this.providerManager.isTierEnabled()
-      ? await this.providerManager.getForUserTiered(userId, "heavy")
-      : await this.providerManager.getForUser(userId);
+    // Get provider/model: use preferred if specified, else fall back to heavy tier
+    let provider: Awaited<ReturnType<typeof this.providerManager.getForUser>>["provider"];
+    let model: string;
+    if (options.preferredModel || options.preferredProvider) {
+      const base = this.providerManager.isTierEnabled()
+        ? await this.providerManager.getForUserTiered(userId, "heavy")
+        : await this.providerManager.getForUser(userId);
+      provider = base.provider;
+      model = options.preferredModel ?? base.model;
+    } else if (this.providerManager.isTierEnabled()) {
+      const tiered = await this.providerManager.getForUserTiered(userId, "heavy");
+      provider = tiered.provider;
+      model = tiered.model;
+    } else {
+      const base = await this.providerManager.getForUser(userId);
+      provider = base.provider;
+      model = base.model;
+    }
 
     const baseInstructions = options.workerInstructions ??
       `You are a sub-agent assistant. Complete the following task efficiently using the tools available to you. Be concise and focused.`;
@@ -254,7 +271,7 @@ export class SubagentManager {
         allowedSkills: this.resolveSkillsFromToolNames(options.toolsNeeded),
         blockedTools: undefined,
         isSubagent: true,
-        maxToolCalls: this.config.max_tool_calls_per_run,
+        maxToolCalls: options.maxToolCalls ?? this.config.max_tool_calls_per_run,
         toolExecutionTimeoutMs: 30_000,
         maxTokenBudget: tokenBudget,
         abortSignal: abortController.signal,

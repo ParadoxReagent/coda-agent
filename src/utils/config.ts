@@ -238,6 +238,33 @@ const ExecutionConfigSchema = z.object({
   ]),
 });
 
+const BrowserConfigSchema = z.object({
+  /** Enable/disable the browser automation skill. */
+  enabled: z.boolean().default(false),
+  /** Docker socket path (leave default unless using a remote Docker host). */
+  docker_socket: z.string().default("/var/run/docker.sock"),
+  /** Docker image for the browser sandbox container. */
+  image: z.string().default("coda-browser-sandbox"),
+  /** Docker network name for browser containers (internet-only, isolated from coda-internal). */
+  sandbox_network: z.string().default("coda-browser-sandbox"),
+  /** Maximum number of concurrent browser sessions. */
+  max_sessions: z.number().default(3),
+  /** Idle session timeout in seconds — sessions inactive longer than this are auto-destroyed. */
+  session_timeout_seconds: z.number().default(300),
+  /** MCP tool call timeout in milliseconds. */
+  tool_timeout_ms: z.number().default(30000),
+  /**
+   * Optional URL allowlist. If non-empty, browser_navigate is restricted to these domains.
+   * Subdomains are automatically included (e.g. "example.com" allows "www.example.com").
+   */
+  url_allowlist: z.array(z.string()).default([]),
+  /**
+   * URL blocklist — these domains are always blocked regardless of allowlist.
+   * Private IP ranges and internal hostnames are always blocked (not configurable).
+   */
+  url_blocklist: z.array(z.string()).default([]),
+});
+
 const McpTransportSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("stdio"),
@@ -279,6 +306,8 @@ const SpecialistPresetOverrideSchema = z.object({
   blocked_tools: z.array(z.string()).optional(),
   default_model: z.string().optional(),
   default_provider: z.string().optional(),
+  token_budget: z.number().optional(),
+  max_tool_calls: z.number().optional(),
   enabled: z.boolean().default(true),
 });
 
@@ -350,9 +379,11 @@ const AppConfigSchema = z.object({
   self_improvement: SelfImprovementConfigSchema.optional(),
   tasks: TasksConfigSchema.optional(),
   specialists: z.record(SpecialistPresetOverrideSchema).optional(),
+  browser: BrowserConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
 export type SelfImprovementConfig = z.infer<typeof SelfImprovementConfigSchema>;
 export type TasksConfig = z.infer<typeof TasksConfigSchema>;
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
@@ -518,6 +549,16 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
   if (process.env.EXECUTION_DEFAULT_IMAGE) {
     const execution = ensureObject(config, "execution");
     execution.default_image = process.env.EXECUTION_DEFAULT_IMAGE;
+  }
+
+  // Browser automation overrides
+  if (process.env.BROWSER_ENABLED !== undefined) {
+    const browser = ensureObject(config, "browser");
+    browser.enabled = process.env.BROWSER_ENABLED === "true";
+  }
+  if (process.env.BROWSER_IMAGE) {
+    const browser = ensureObject(config, "browser");
+    browser.image = process.env.BROWSER_IMAGE;
   }
 
   // Set defaults for llm config

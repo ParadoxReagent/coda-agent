@@ -7,7 +7,7 @@ import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { SubagentManager } from "../../core/subagent-manager.js";
 import { getCurrentContext } from "../../core/correlation.js";
-import { resolvePreset, getPresetNames } from "../../core/specialist-presets.js";
+import { resolvePreset, getPresetNames } from "../../core/agent-loader.js";
 import type { SpecialistsConfig } from "../../utils/config.js";
 import { createEnvelope } from "../../core/subagent-envelope.js";
 import type { SubagentTaskType } from "../../core/subagent-envelope.js";
@@ -515,6 +515,9 @@ export class SubagentSkill implements Skill {
         workerName: `specialist-${specialistName}`,
         workerInstructions: preset.systemPrompt,
         tokenBudget: preset.tokenBudget,
+        preferredModel: preset.defaultModel,
+        preferredProvider: preset.defaultProvider,
+        maxToolCalls: preset.maxToolCalls,
         envelope,
       });
       return result;

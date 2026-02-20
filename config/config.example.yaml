@@ -86,6 +86,19 @@ weather: {}         # Free NWS API, no key needed
 #     - "alpine:*"
 #     - "coda-skill-*"  # Pre-built skill images (use npm run build:skill-images)
 
+# browser:
+#   enabled: false  # or BROWSER_ENABLED=true
+#   # Build image first: docker compose --profile browser-build build
+#   image: "coda-browser-sandbox"          # or BROWSER_IMAGE
+#   sandbox_network: "coda-browser-sandbox" # Internet-only network (isolated from coda-internal)
+#   max_sessions: 3                         # Max concurrent browser sessions
+#   session_timeout_seconds: 300            # Auto-destroy sessions idle > this
+#   tool_timeout_ms: 30000                  # MCP tool call timeout
+#   # URL allowlist — if non-empty, only these domains are reachable
+#   url_allowlist: []
+#   # Additional URL blocklist (private IPs/localhost are always blocked)
+#   url_blocklist: []
+
 # slack:
 #   app_token: ""  # or SLACK_APP_TOKEN
 #   bot_token: ""  # or SLACK_BOT_TOKEN
@@ -131,8 +144,15 @@ weather: {}         # Free NWS API, no key needed
 #   few_shot_min_tool_calls: 2         # Min tool calls in interaction to qualify
 
 # ── Specialist Agents (Phase 5.2) ────────────────
-# Override built-in specialist presets (home, research, lab, planner).
-# All presets work with zero configuration — these sections allow customisation.
+# Per-agent overrides for directory-based specialists (home, research, lab, planner, ...).
+# Specialist agents are defined as directories in src/agents/{name}/ containing:
+#   soul.md       — system prompt (plain markdown)
+#   tools.md      — allowed tools (one per line, # comments ok)
+#   config.yaml   — description, model, token_budget, etc.
+#   references/   — optional .md/.txt/.json docs appended to the system prompt
+#
+# All agents work with zero configuration. The specialists: section below allows
+# per-agent overrides without editing agent directory files.
 #
 # specialists:
 #   research:
@@ -141,9 +161,11 @@ weather: {}         # Free NWS API, no key needed
 #       - firecrawl_scrape
 #       - firecrawl_search
 #       - note_save
+#     token_budget: 60000                # Override token budget
 #   lab:
 #     default_model: "claude-opus-4-6"   # Use a specific model for this specialist
 #     default_provider: "anthropic"
+#     max_tool_calls: 50                 # Override max tool calls
 
 # ── Long-Horizon Tasks (Phase 4.5) ───────────────
 # Persistent multi-day task tracking with checkpointing and auto-resumption.

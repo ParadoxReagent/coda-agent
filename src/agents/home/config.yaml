@@ -1,0 +1,6 @@
+description: "Household management: reminders, notes, weather, and personal organisation"
+enabled: true
+default_model: null
+default_provider: null
+token_budget: 30000
+max_tool_calls: null

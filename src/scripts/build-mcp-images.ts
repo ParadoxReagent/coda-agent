@@ -146,6 +146,18 @@ function checkDockerfileSecurity(serverName: string, serverDir: string): Securit
   return result;
 }
 
+/**
+ * Extra Docker images that are built alongside MCP server images.
+ * Each entry maps a human-readable name to its build context dir and target image name.
+ */
+const EXTRA_IMAGES: Array<{ name: string; dir: string; image: string }> = [
+  {
+    name: "browser-sandbox",
+    dir: join(__dirname, "..", "skills", "browser"),
+    image: "coda-browser-sandbox",
+  },
+];
+
 async function main() {
   const options = parseArgs();
 
@@ -263,9 +275,66 @@ async function main() {
     }
   }
 
+  // Build extra images (browser sandbox, etc.) when not filtering by server name
+  if (!options.serverName || EXTRA_IMAGES.some((e) => e.name === options.serverName)) {
+    const extraToBuild = options.serverName
+      ? EXTRA_IMAGES.filter((e) => e.name === options.serverName)
+      : EXTRA_IMAGES;
+
+    for (const extra of extraToBuild) {
+      if (!existsSync(join(extra.dir, "Dockerfile"))) {
+        logger.warn({ name: extra.name, dir: extra.dir }, "Extra image Dockerfile not found, skipping");
+        continue;
+      }
+
+      if (options.list) {
+        const exists = imageExists(extra.image);
+        logger.info(
+          { name: extra.name, image: extra.image, built: exists },
+          exists ? "✓ Image exists" : "✗ Not built"
+        );
+        continue;
+      }
+
+      if (options.securityCheck) {
+        const result = checkDockerfileSecurity(extra.name, extra.dir);
+        if (result.warnings.length === 0) {
+          logger.info({ name: extra.name }, "✓ Security check passed");
+        } else {
+          logger.warn({ name: extra.name, warnings: result.warnings }, "⚠ Security issues found");
+        }
+        continue;
+      }
+
+      if (options.dryRun) {
+        logger.info({ name: extra.name, image: extra.image }, "[DRY RUN] Would build extra image");
+        continue;
+      }
+
+      try {
+        if (!options.force && imageExists(extra.image)) {
+          logger.info({ name: extra.name, image: extra.image }, "Image already exists, skipping (use --force to rebuild)");
+          skipped++;
+          continue;
+        }
+
+        logger.info({ name: extra.name, image: extra.image, path: extra.dir }, "Building extra image");
+        execSync(`docker build -t ${extra.image} ${extra.dir}`, { stdio: "inherit" });
+        logger.info({ name: extra.name, image: extra.image }, "Successfully built extra image");
+        built++;
+      } catch (error) {
+        logger.error(
+          { name: extra.name, error: error instanceof Error ? error.message : String(error) },
+          "Failed to build extra image"
+        );
+        failed++;
+      }
+    }
+  }
+
   // Summary
   logger.info(
-    { built, skipped, failed, total: serversToBuild.length },
+    { built, skipped, failed, total: serversToBuild.length + EXTRA_IMAGES.length },
     options.dryRun ? "Dry run complete" : "Build complete"
   );
 

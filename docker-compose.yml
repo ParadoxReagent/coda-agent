@@ -112,6 +112,16 @@ services:
     profiles:
       - mcp-build
 
+  # Browser sandbox image (build-only — containers are spawned dynamically by BrowserService)
+  # Build: npm run build:mcp-images  OR  docker compose --profile mcp-build build
+  browser-sandbox:
+    build:
+      context: ./src/skills/browser
+      dockerfile: Dockerfile
+    image: coda-browser-sandbox
+    profiles:
+      - mcp-build
+
 volumes:
   coda-data:
   redis-data:
@@ -122,6 +132,11 @@ networks:
     driver: bridge
   lan-bridge:
     driver: bridge
+  # Internet-only sandbox network for ephemeral browser containers.
+  # NOT connected to coda-internal — browser containers cannot reach Redis, Postgres, etc.
+  coda-browser-sandbox:
+    driver: bridge
+    internal: false
 
 secrets:
   pg_password:
