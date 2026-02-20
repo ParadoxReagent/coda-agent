@@ -386,12 +386,6 @@ Monthly Opus harvests best interactions from audit log into `solution_patterns` 
 
 Items captured from research and brainstorming that don't fit cleanly into the current phase roadmap.
 
-### Browser Automation (Playwright/Puppeteer)
-Firecrawl handles reading but not interaction. A Playwright integration would enable:
-- Logging into portals requiring button clicks
-- Actually booking/reserving (tables, tickets) not just finding links
-- Navigating SPAs where data is only revealed after user interactions
-
 ### Plex Integrations
 - **Spoiler-free companion** — query current playback timestamp before answering questions about a show/film
 - **Semantic library search** — ingest Plex titles/plot summaries/subtitle text into vector memory
