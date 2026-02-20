@@ -1,17 +1,23 @@
 /**
  * SubagentSkill: exposes sync and async subagent delegation tools to the LLM.
  * Provides tools for spawning, listing, stopping, inspecting, and messaging subagents.
+ * Also exposes specialist_spawn and specialist_list for preset-based delegation.
  */
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { SubagentManager } from "../../core/subagent-manager.js";
 import { getCurrentContext } from "../../core/correlation.js";
+import { resolvePreset, getPresetNames } from "../../core/specialist-presets.js";
+import type { SpecialistsConfig } from "../../utils/config.js";
+import { createEnvelope } from "../../core/subagent-envelope.js";
+import type { SubagentTaskType } from "../../core/subagent-envelope.js";
 
 export class SubagentSkill implements Skill {
   readonly name = "subagents";
   readonly description = "Delegate tasks to sub-agents that run in parallel or synchronously";
 
   private manager?: SubagentManager;
+  private specialistConfig?: SpecialistsConfig;
 
   constructor(manager?: SubagentManager) {
     this.manager = manager;
@@ -20,6 +26,11 @@ export class SubagentSkill implements Skill {
   /** Provide the manager reference (used when wiring after construction). */
   setManager(manager: SubagentManager): void {
     this.manager = manager;
+  }
+
+  /** Set specialist config overrides from app config. */
+  setSpecialistConfig(config: SpecialistsConfig | undefined): void {
+    this.specialistConfig = config;
   }
 
   getTools(): SkillToolDefinition[] {
@@ -48,6 +59,21 @@ export class SubagentSkill implements Skill {
             worker_instructions: {
               type: "string",
               description: "Optional custom system prompt for the sub-agent",
+            },
+            task_type: {
+              type: "string",
+              enum: ["research", "code_execution", "data_extraction", "summarization", "analysis", "general"],
+              description: "Optional task type for envelope metadata",
+            },
+            priority: {
+              type: "string",
+              enum: ["low", "normal", "high"],
+              description: "Optional task priority (default: normal)",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional tags for the envelope",
             },
           },
           required: ["task", "tools_needed"],
@@ -89,10 +115,61 @@ export class SubagentSkill implements Skill {
               items: { type: "string" },
               description: "Blacklist of tool names to exclude",
             },
+            task_type: {
+              type: "string",
+              enum: ["research", "code_execution", "data_extraction", "summarization", "analysis", "general"],
+              description: "Optional task type for envelope metadata",
+            },
+            priority: {
+              type: "string",
+              enum: ["low", "normal", "high"],
+              description: "Optional task priority (default: normal)",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional tags for the envelope",
+            },
           },
           required: ["task"],
         },
         mainAgentOnly: true,
+      },
+      {
+        name: "specialist_spawn",
+        description:
+          "Delegate a task to a specialist sub-agent with a pre-configured domain focus. " +
+          "Each specialist has scoped tools and a tailored system prompt. " +
+          "Use specialist_list to see available specialists.",
+        input_schema: {
+          type: "object",
+          properties: {
+            specialist: {
+              type: "string",
+              description: "Specialist preset name (e.g. 'research', 'lab', 'home', 'planner')",
+            },
+            task: {
+              type: "string",
+              description: "Clear description of what the specialist should accomplish",
+            },
+            timeout_minutes: {
+              type: "number",
+              description: "Timeout in minutes (default: 2, max: 10)",
+            },
+          },
+          required: ["specialist", "task"],
+        },
+        mainAgentOnly: true,
+      },
+      {
+        name: "specialist_list",
+        description: "List available specialist agent presets and their descriptions",
+        input_schema: {
+          type: "object",
+          properties: {},
+        },
+        mainAgentOnly: true,
+        permissionTier: 0,
       },
       {
         name: "sessions_list",
@@ -205,6 +282,12 @@ export class SubagentSkill implements Skill {
       case "sessions_send":
         return this.handleSend(userId, toolInput);
 
+      case "specialist_spawn":
+        return this.handleSpecialistSpawn(userId, channel, toolInput);
+
+      case "specialist_list":
+        return this.handleSpecialistList();
+
       default:
         return `Unknown subagent tool: ${toolName}`;
     }
@@ -233,16 +316,29 @@ export class SubagentSkill implements Skill {
     const toolsNeeded = input.tools_needed as string[];
     const workerName = input.worker_name as string | undefined;
     const workerInstructions = input.worker_instructions as string | undefined;
+    const taskType = input.task_type as SubagentTaskType | undefined;
+    const priority = input.priority as "low" | "normal" | "high" | undefined;
+    const tags = input.tags as string[] | undefined;
 
     if (!task || !toolsNeeded || toolsNeeded.length === 0) {
       return "Both 'task' and 'tools_needed' are required for delegation.";
     }
+
+    const envelope = taskType
+      ? createEnvelope(crypto.randomUUID(), taskType, task, {
+          requesterId: userId,
+          requesterChannel: channel,
+          priority,
+          tags,
+        })
+      : undefined;
 
     try {
       return await this.manager!.delegateSync(userId, channel, task, {
         toolsNeeded,
         workerName,
         workerInstructions,
+        envelope,
       });
     } catch (err) {
       return `Delegation failed: ${err instanceof Error ? err.message : "Unknown error"}`;
@@ -259,6 +355,19 @@ export class SubagentSkill implements Skill {
       return "The 'task' field is required to spawn a sub-agent.";
     }
 
+    const taskType = input.task_type as SubagentTaskType | undefined;
+    const priority = input.priority as "low" | "normal" | "high" | undefined;
+    const tags = input.tags as string[] | undefined;
+
+    const envelope = taskType
+      ? createEnvelope(crypto.randomUUID(), taskType, task, {
+          requesterId: userId,
+          requesterChannel: channel,
+          priority,
+          tags,
+        })
+      : undefined;
+
     try {
       const result = await this.manager!.spawn(userId, channel, task, {
         model: input.model as string | undefined,
@@ -266,6 +375,7 @@ export class SubagentSkill implements Skill {
         timeoutMinutes: input.timeout_minutes as number | undefined,
         allowedTools: input.allowed_tools as string[] | undefined,
         blockedTools: input.blocked_tools as string[] | undefined,
+        envelope,
       });
 
       return JSON.stringify({
@@ -369,7 +479,61 @@ export class SubagentSkill implements Skill {
       completed_at: info.completedAt?.toISOString(),
       result_preview: info.result?.slice(0, 300),
       error: info.error,
+      envelope_result: info.metadata.envelopeResult ?? undefined,
     }, null, 2);
+  }
+
+  private async handleSpecialistSpawn(
+    userId: string,
+    channel: string,
+    input: Record<string, unknown>
+  ): Promise<string> {
+    const specialistName = input.specialist as string;
+    const task = input.task as string;
+
+    if (!specialistName || !task) {
+      return "Both 'specialist' and 'task' are required.";
+    }
+
+    let preset;
+    try {
+      preset = resolvePreset(specialistName, this.specialistConfig);
+    } catch (err) {
+      const available = getPresetNames().join(", ");
+      return `Unknown specialist '${specialistName}'. Available: ${available}`;
+    }
+
+    const envelope = createEnvelope(crypto.randomUUID(), "general", task, {
+      requesterId: userId,
+      requesterChannel: channel,
+      specialistPreset: specialistName,
+    });
+
+    try {
+      const result = await this.manager!.delegateSync(userId, channel, task, {
+        toolsNeeded: preset.allowedTools,
+        workerName: `specialist-${specialistName}`,
+        workerInstructions: preset.systemPrompt,
+        tokenBudget: preset.tokenBudget,
+        envelope,
+      });
+      return result;
+    } catch (err) {
+      return `Specialist delegation failed: ${err instanceof Error ? err.message : "Unknown error"}`;
+    }
+  }
+
+  private handleSpecialistList(): string {
+    const names = getPresetNames();
+    const presets = names.map(name => {
+      try {
+        const preset = resolvePreset(name, this.specialistConfig);
+        return { name: preset.name, description: preset.description, tools: preset.allowedTools };
+      } catch {
+        return { name, description: "unavailable", tools: [] };
+      }
+    });
+    return JSON.stringify({ specialists: presets }, null, 2);
   }
 
   private handleSend(

@@ -19,6 +19,7 @@ import type { AuditService } from "../../core/audit.js";
 import { improvementProposals } from "../../db/schema.js";
 import { eq, desc, inArray } from "drizzle-orm";
 import { assembleReflectionInput, runReflection } from "./reflection.js";
+import { assembleGapDetectionInput, runGapDetection } from "./gap-detection.js";
 import type { ProposalCategory } from "./types.js";
 
 export class SelfImprovementSkill implements Skill {
@@ -33,20 +34,28 @@ export class SelfImprovementSkill implements Skill {
   private auditService?: AuditService;
   private getSystemPromptSnapshot?: (userId: string) => Promise<string>;
   private getToolList?: () => string[];
+  private getSkillList?: () => string[];
   private reflectionCron: string;
   private approvalChannel: string;
   private promptEvolutionEnabled: boolean;
   private opusLlm?: SkillContext["opusLlm"];
   private llm?: SkillContext["llm"];
+  private gapDetectionEnabled: boolean;
+  private gapDetectionCron: string;
+  private fewShotService?: { harvest(): Promise<number> };
 
   constructor(config?: {
     reflection_cron?: string;
     approval_channel?: string;
     prompt_evolution_enabled?: boolean;
+    gap_detection_enabled?: boolean;
+    gap_detection_cron?: string;
   }) {
     this.reflectionCron = config?.reflection_cron ?? "0 3 * * 0";
     this.approvalChannel = config?.approval_channel ?? "discord";
     this.promptEvolutionEnabled = config?.prompt_evolution_enabled ?? false;
+    this.gapDetectionEnabled = config?.gap_detection_enabled ?? true;
+    this.gapDetectionCron = config?.gap_detection_cron ?? "0 2 1 * *";
   }
 
   setPromptManager(pm: PromptManager): void {
@@ -63,6 +72,14 @@ export class SelfImprovementSkill implements Skill {
 
   setToolListGetter(fn: () => string[]): void {
     this.getToolList = fn;
+  }
+
+  setSkillListGetter(fn: () => string[]): void {
+    this.getSkillList = fn;
+  }
+
+  setFewShotService(service: { harvest(): Promise<number> }): void {
+    this.fewShotService = service;
   }
 
   getRequiredConfig(): string[] {
@@ -133,6 +150,28 @@ export class SelfImprovementSkill implements Skill {
         requiresConfirmation: true,
         permissionTier: 3,
       },
+      {
+        name: "gap_detection_trigger",
+        description: "Manually trigger a monthly capability gap detection cycle (analyzes 30 days of audit data).",
+        input_schema: {
+          type: "object" as const,
+          properties: {},
+        },
+        mainAgentOnly: true,
+        requiresConfirmation: true,
+        permissionTier: 3,
+      },
+      {
+        name: "few_shot_harvest_trigger",
+        description: "Manually trigger a few-shot pattern harvest from high-scoring recent interactions.",
+        input_schema: {
+          type: "object" as const,
+          properties: {},
+        },
+        mainAgentOnly: true,
+        requiresConfirmation: true,
+        permissionTier: 3,
+      },
     ];
   }
 
@@ -151,6 +190,16 @@ export class SelfImprovementSkill implements Skill {
         enabled: true,
         description: "Weekly Opus reflection cycle for self-improvement",
       });
+
+      if (this.gapDetectionEnabled) {
+        ctx.scheduler.registerTask({
+          name: "monthly_gap_detection",
+          cronExpression: this.gapDetectionCron,
+          handler: async () => { await this.runMonthlyGapDetection(); },
+          enabled: true,
+          description: "Monthly capability gap detection using 30 days of audit data",
+        });
+      }
     }
   }
 
@@ -162,6 +211,8 @@ export class SelfImprovementSkill implements Skill {
       case "improvement_proposal_decide": return this.decideProposal(input);
       case "improvement_trigger_reflection": return this.triggerReflection();
       case "prompt_rollback": return this.rollbackPrompt(input);
+      case "gap_detection_trigger": return this.triggerGapDetection();
+      case "few_shot_harvest_trigger": return this.triggerFewShotHarvest();
       default: return `Unknown tool: ${toolName}`;
     }
   }
@@ -286,6 +337,107 @@ export class SelfImprovementSkill implements Skill {
         ? `Rolled back prompt section "${sectionName}" to previous version.`
         : `No previous version to roll back to for "${sectionName}".`,
     });
+  }
+
+  private async triggerGapDetection(): Promise<string> {
+    try {
+      const count = await this.runMonthlyGapDetection();
+      return JSON.stringify({
+        success: true,
+        proposals_generated: count,
+        message: `Gap detection cycle complete. Generated ${count} proposals.`,
+      });
+    } catch (err) {
+      return JSON.stringify({ error: `Gap detection failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  private async triggerFewShotHarvest(): Promise<string> {
+    if (!this.fewShotService) {
+      return JSON.stringify({ error: "Few-shot service not configured" });
+    }
+    try {
+      const count = await this.fewShotService.harvest();
+      return JSON.stringify({
+        success: true,
+        patterns_harvested: count,
+        message: `Few-shot harvest complete. Stored ${count} new patterns.`,
+      });
+    } catch (err) {
+      return JSON.stringify({ error: `Few-shot harvest failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  /**
+   * Run the monthly capability gap detection cycle.
+   * Returns the number of proposals generated.
+   */
+  async runMonthlyGapDetection(): Promise<number> {
+    if (!this.db || !this.auditService) {
+      this.logger?.warn("Gap detection: db or auditService not available");
+      return 0;
+    }
+
+    const effectiveLlm = this.opusLlm ?? this.llm;
+    if (!effectiveLlm) {
+      this.logger?.warn("Gap detection: no LLM available");
+      return 0;
+    }
+
+    this.logger?.info("Starting monthly gap detection cycle");
+
+    try {
+      const skillList = this.getSkillList?.() ?? [];
+      const toolList = this.getToolList?.() ?? [];
+
+      const gapInput = await assembleGapDetectionInput(
+        this.db,
+        this.auditService,
+        skillList,
+        toolList,
+        this.logger!
+      );
+
+      const proposals = await runGapDetection(gapInput, effectiveLlm, this.logger!);
+
+      if (proposals.length === 0) {
+        this.logger?.info("Gap detection produced no proposals");
+        return 0;
+      }
+
+      const cycleId = gapInput.cycleId;
+      await this.db.insert(improvementProposals).values(
+        proposals.map(p => ({
+          cycleId,
+          category: "capability_gap" as ProposalCategory,
+          title: p.title.slice(0, 500),
+          description: p.description,
+          proposedDiff: p.proposed_diff,
+          targetSection: p.target_section,
+          priority: Math.min(10, Math.max(1, Math.round(p.priority))),
+          status: "pending",
+          metadata: { source: "gap_detection" },
+        }))
+      );
+
+      const summary = [
+        `🔍 **Monthly Gap Detection Complete** (${proposals.length} proposals)`,
+        "",
+        ...proposals.map((p, i) =>
+          `**${i + 1}. ${p.title}** (priority: ${p.priority})\n${p.description.slice(0, 150)}...`
+        ),
+        "",
+        "Use `improvement_proposals_list` to review and act on these proposals.",
+      ].join("\n");
+
+      await this.messageSender?.send(this.approvalChannel, summary, "gap-detection");
+
+      this.logger?.info({ proposalCount: proposals.length, cycleId }, "Gap detection cycle complete");
+      return proposals.length;
+    } catch (err) {
+      this.logger?.error({ error: err }, "Gap detection failed");
+      return 0;
+    }
   }
 
   /**

@@ -173,7 +173,8 @@ HA MCP server or n8n webhook bridge. Entity states, automations, history. Proact
 - **Effort: M-L** (4-6 hrs)
 
 ### 🔲 3.2 Morning Briefing Pipeline
-Daily scheduled context assembly: calendar, weather, home state, reminders, n8n events, email unread summary (will be from n8n webhook?). Sonnet synthesis into prioritized summary with suggested actions. Delivered via MessageSender (1.6).
+Daily scheduled context assembly: calendar, weather, home state, reminders, n8n events, email unread summary (email will be from n8n webhook?). 
+Sonnet synthesis into prioritized summary with suggested actions. Delivered via MessageSender (1.6).
 - **Effort: M** (3-4 hrs) | **Depends on**: 1.6, 3.1
 
 ### 🔲 3.3 Ambient Monitoring Agents
@@ -264,20 +265,51 @@ Persistent multi-day tasks with checkpointing, autonomous resumption, blocker su
 
 *Theme: Specialist agents, self-critique, autonomous growth, and ecosystem extensibility.*
 
-### 🔲 5.1 Orchestrator/Worker IO Contract
+### ✅ 5.1 Orchestrator/Worker IO Contract
 Typed IO envelopes for subagent tasks. Thin layer on existing `sessions_spawn`.
+
+**Implemented:**
+- `SubagentEnvelope` / `SubagentResult` types (`src/core/subagent-envelope.ts`) — taskId, taskType, priority, tags, expectedOutputSchema
+- `createEnvelope()`, `wrapResult()`, `validateOutput()` helpers
+- `envelope?` on `SpawnOptions` and `DelegateSyncOptions`; stored in `record.metadata.envelope` / `.envelopeResult`
+- `sessions_spawn` / `delegate_to_subagent` accept `task_type`, `priority`, `tags` params
+- `sessions_info` now includes `envelope_result` when present
 - **Effort: S-M** (2-3 hrs)
 
-### 🔲 5.2 Specialist Agent Library
+### ✅ 5.2 Specialist Agent Library
 Pre-configured specialist presets: Home agent, Research agent, Lab agent, Planner agent. Each with focused system prompt + tool allowlist.
+
+**Implemented:**
+- `SpecialistPreset` interface + 4 built-in presets (`src/core/specialist-presets.ts`): `home`, `research`, `lab`, `planner`
+- `resolvePreset()` merges built-in with config overrides; `getPresetNames()` for discovery
+- `specialist_spawn` tool on SubagentSkill — resolves preset → delegateSync with preset's system prompt + allowed tools
+- `specialist_list` tool — returns all presets with descriptions
+- `specialists:` config section in AppConfig + `SpecialistsConfig` type
+- System prompt section added to orchestrator; `config/config.example.yaml` documented
 - **Effort: M** (6-8 hrs total)
 
-### 🔲 5.3 Critique Loop
+### ✅ 5.3 Critique Loop
 Haiku critic reviews high-stakes outputs before execution. Checks safety, accuracy, side effects, simplicity. Critique outcomes logged to audit.
+
+**Implemented:**
+- `CritiqueService` (`src/core/critique-service.ts`) — Haiku-powered JSON critique with severity scoring
+- Runs in `executeTools()` BEFORE confirmation check; blocks unsafe actions before prompting user
+- `AuditEventType` extended with `"critique"`; critique outcomes fire-and-forget logged
+- `requiresCritique?: boolean` on `SkillToolDefinition` for opt-in at lower tiers
+- Config: `critique_enabled` (default true), `critique_min_tier` (default 3) under `self_improvement`
+- Wired in `main.ts`; LLM deferred to after provider manager init
 - **Effort: M** (3-4 hrs)
 
-### 🔲 5.4 Gap Detection & Skill Proposal
-Monthly Opus review: 30 days of audit → top 3 capability gaps → structured proposals. User approves/rejects. Approved proposals built via docker-executor + skill-creator.
+### ✅ 5.4 Gap Detection & Skill Proposal
+Monthly Opus review: 30 days of audit → top 3 capability gaps → structured proposals. User approves/rejects.
+
+**Implemented:**
+- `assembleGapDetectionInput()` + `runGapDetection()` (`src/skills/self-improvement/gap-detection.ts`)
+- 30-day audit stats, failed tool calls by tool name, low-scoring assessment patterns
+- Focused Opus prompt extracting `capability_gap` category proposals only (max 3)
+- `gap_detection_trigger` tool (tier 3, mainAgentOnly) + monthly cron (`0 2 1 * *`) in SelfImprovementSkill
+- Reuses `improvement_proposals` table; `setSkillListGetter()` on skill
+- Config: `gap_detection_enabled`, `gap_detection_cron` under `self_improvement`
 - **Effort: L** (4-5 hrs)
 
 ### 🔲 5.5 Expose Coda as MCP Server

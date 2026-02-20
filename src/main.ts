@@ -52,6 +52,8 @@ import { PromptManager } from "./core/prompt-manager.js";
 import { LearnedTierClassifier } from "./core/learned-classifier.js";
 import { SelfImprovementSkill } from "./skills/self-improvement/skill.js";
 import { TaskExecutionSkill } from "./skills/tasks/skill.js";
+import { CritiqueService } from "./core/critique-service.js";
+import { FewShotService } from "./core/few-shot-service.js";
 import type { SkillContext } from "./skills/context.js";
 import type { AppConfig } from "./utils/config.js";
 import type { EventBus } from "./core/events.js";
@@ -338,6 +340,12 @@ async function main() {
     handler: async () => {
       logger.info("Running learned classifier retrain");
       await learnedClassifier.retrain();
+      const stats = learnedClassifier.getStats();
+      await messageSender.send(
+        "discord",
+        `Routing classifier retrained: ${stats.patternCount} patterns learned from ${stats.lastTrainedAt ? 'latest data' : 'no data'}.`,
+        "routing.retrain"
+      );
     },
     description: "Weekly retrain of learned tier classifier from routing_decisions + self_assessments",
   });
@@ -356,8 +364,35 @@ async function main() {
   );
 
   // Wire self-assessment and prompt-manager into orchestrator
-  orchestrator.setSelfAssessmentService(selfAssessmentService);
+  if (config.self_improvement?.assessment_enabled !== false) {
+    orchestrator.setSelfAssessmentService(selfAssessmentService);
+  }
   orchestrator.setPromptManager(promptManager);
+
+  // Wire critique service (5.3)
+  if (config.self_improvement?.critique_enabled !== false) {
+    const critiqueService = new CritiqueService(logger, auditService);
+    // Wire light LLM after skill startup (use a deferred approach)
+    const critiqueMinTier = config.self_improvement?.critique_min_tier ?? 3;
+    orchestrator.setCritiqueService(critiqueService, critiqueMinTier);
+    // LLM wired below after skillRegistry.startupAll builds the light llm
+    (async () => {
+      const { provider, model } = await providerManager.getForUserTiered("system", "light").catch(
+        () => providerManager.getForUser("system")
+      );
+      critiqueService.setLlm({
+        async chat(params) {
+          const response = await provider.chat({
+            model,
+            system: params.system,
+            messages: params.messages.map(m => ({ role: m.role, content: m.content })),
+            maxTokens: params.maxTokens ?? 512,
+          });
+          return { text: response.text };
+        },
+      });
+    })().catch(err => logger.warn({ error: err }, "Failed to wire critique LLM"));
+  }
 
   // Register audit skill (read-only agent self-introspection)
   skillRegistry.register(new AuditSkill(auditService));
@@ -377,6 +412,8 @@ async function main() {
       reflection_cron: config.self_improvement?.reflection_cron,
       approval_channel: config.self_improvement?.approval_channel,
       prompt_evolution_enabled: config.self_improvement?.prompt_evolution_enabled,
+      gap_detection_enabled: config.self_improvement?.gap_detection_enabled,
+      gap_detection_cron: config.self_improvement?.gap_detection_cron,
     });
     selfImprovementSkill.setPromptManager(promptManager);
     selfImprovementSkill.setAuditService(auditService);
@@ -386,7 +423,24 @@ async function main() {
     selfImprovementSkill.setToolListGetter(
       () => skillRegistry.getToolDefinitions().map(t => t.name)
     );
+    selfImprovementSkill.setSkillListGetter(
+      () => skillRegistry.listSkills().map(s => s.name)
+    );
     skillRegistry.register(selfImprovementSkill);
+
+    // Wire few-shot service (5.7)
+    if (config.self_improvement?.few_shot_enabled !== false) {
+      const fewShotService = new FewShotService(db, logger, {
+        minScore: config.self_improvement?.few_shot_min_score,
+        minToolCalls: config.self_improvement?.few_shot_min_tool_calls,
+      });
+      const opusLlmForFewShot = buildOpusLlm();
+      if (opusLlmForFewShot) {
+        fewShotService.setOpusLlm(opusLlmForFewShot);
+      }
+      orchestrator.setFewShotService(fewShotService);
+      selfImprovementSkill.setFewShotService(fewShotService);
+    }
   }
 
   // 8a. Initialize DoctorService
@@ -440,6 +494,7 @@ async function main() {
     logger
   );
   subagentSkill.setManager(subagentManager);
+  subagentSkill.setSpecialistConfig(config.specialists);
 
   // Helper: build Opus LLM client (for privileged skills like self-improvement)
   const opusModel = config.self_improvement?.opus_model;

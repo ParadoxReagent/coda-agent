@@ -118,6 +118,32 @@ weather: {}         # Free NWS API, no key needed
 #   max_reflection_input_tokens: 8000  # Max tokens sent to Opus for reflection
 #   approval_channel: "discord"        # Channel to deliver proposal summaries
 #   routing_retrain_cron: "0 4 * * 0"  # Sunday 4 AM (learned classifier retraining)
+#   # 5.3 Critique Loop — Haiku safety review before high-tier tool calls
+#   critique_enabled: true             # Enable pre-execution critique for tier >= critique_min_tier
+#   critique_min_tier: 3               # Minimum permission tier to trigger critique
+#   # 5.4 Gap Detection — Monthly Opus analysis of capability gaps
+#   gap_detection_enabled: true        # Enable monthly capability gap detection
+#   gap_detection_cron: "0 2 1 * *"   # 1st of month 2 AM
+#   # 5.7 Few-Shot Library — Harvest and inject solution patterns
+#   few_shot_enabled: true             # Enable few-shot pattern harvesting and injection
+#   few_shot_harvest_cron: "0 4 1 * *" # 1st of month 4 AM
+#   few_shot_min_score: 4              # Min self-assessment score to qualify for harvest (0-5)
+#   few_shot_min_tool_calls: 2         # Min tool calls in interaction to qualify
+
+# ── Specialist Agents (Phase 5.2) ────────────────
+# Override built-in specialist presets (home, research, lab, planner).
+# All presets work with zero configuration — these sections allow customisation.
+#
+# specialists:
+#   research:
+#     system_prompt: "Custom research specialist prompt..."  # Override system prompt
+#     allowed_tools:                      # Override allowed tools
+#       - firecrawl_scrape
+#       - firecrawl_search
+#       - note_save
+#   lab:
+#     default_model: "claude-opus-4-6"   # Use a specific model for this specialist
+#     default_provider: "anthropic"
 
 # ── Long-Horizon Tasks (Phase 4.5) ───────────────
 # Persistent multi-day task tracking with checkpointing and auto-resumption.

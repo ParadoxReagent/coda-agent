@@ -15,6 +15,8 @@ import { BaseAgent } from "./base-agent.js";
 import { ContentSanitizer } from "./sanitizer.js";
 import { getCurrentContext, withContext, createCorrelationId } from "./correlation.js";
 import { RETENTION } from "../utils/retention.js";
+import type { SubagentEnvelope } from "./subagent-envelope.js";
+import { wrapResult } from "./subagent-envelope.js";
 
 /**
  * Mandatory safety rules prepended to all subagent system prompts.
@@ -60,6 +62,7 @@ export interface SpawnOptions {
   allowedTools?: string[];
   blockedTools?: string[];
   tokenBudget?: number;
+  envelope?: SubagentEnvelope;
 }
 
 export interface DelegateSyncOptions {
@@ -67,6 +70,7 @@ export interface DelegateSyncOptions {
   workerName?: string;
   workerInstructions?: string;
   tokenBudget?: number;
+  envelope?: SubagentEnvelope;
 }
 
 interface ActiveRun {
@@ -166,7 +170,7 @@ export class SubagentManager {
       toolCallCount: 0,
       timeoutMs,
       transcript: [],
-      metadata: {},
+      metadata: options.envelope ? { envelope: options.envelope } : {},
       allowedTools: options.allowedTools,
       blockedTools: options.blockedTools,
       createdAt: new Date(),
@@ -221,7 +225,7 @@ export class SubagentManager {
       ? Math.min(options.tokenBudget, this.config.max_token_budget)
       : this.config.default_token_budget;
 
-    const runId = crypto.randomUUID();
+    const runId = options.envelope?.taskId ?? crypto.randomUUID();
     const abortController = new AbortController();
 
     // Get provider/model for user (use heavy tier if tiers are enabled)
@@ -284,6 +288,23 @@ export class SubagentManager {
         inputTokens: result.totalTokens.input,
         outputTokens: result.totalTokens.output,
       });
+
+      // If an envelope was provided, wrap and store the result
+      if (options.envelope) {
+        const envelopeResult = wrapResult(
+          options.envelope,
+          result.text,
+          "completed",
+          {
+            durationMs,
+            inputTokens: result.totalTokens.input,
+            outputTokens: result.totalTokens.output,
+            toolCallCount: result.toolCallCount,
+          }
+        );
+        // Attach to result metadata (best-effort, in-memory only for sync runs)
+        this.logger.debug({ runId, envelopeResult }, "Sync subagent envelope result");
+      }
 
       // Return output files if present, wrapped in JSON for orchestrator's extractOutputFiles
       if (result.outputFiles && result.outputFiles.length > 0) {
@@ -530,6 +551,23 @@ export class SubagentManager {
       record.toolCallCount = result.toolCallCount;
       record.transcript = result.transcript.slice(0, RETENTION.SUBAGENT_MAX_TRANSCRIPT_ENTRIES);
       record.completedAt = new Date();
+
+      // Store envelope result if envelope was provided
+      const envelope = record.metadata.envelope as import("./subagent-envelope.js").SubagentEnvelope | undefined;
+      if (envelope) {
+        const durationMs = record.completedAt.getTime() - (record.startedAt?.getTime() ?? record.createdAt.getTime());
+        record.metadata.envelopeResult = wrapResult(
+          envelope,
+          result.text,
+          "completed",
+          {
+            durationMs,
+            inputTokens: result.totalTokens.input,
+            outputTokens: result.totalTokens.output,
+            toolCallCount: result.toolCallCount,
+          }
+        );
+      }
 
       // Track usage
       await this.providerManager.trackUsage(provider.name, model, {

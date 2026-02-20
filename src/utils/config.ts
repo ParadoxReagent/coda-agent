@@ -273,6 +273,15 @@ const McpConfigSchema = z.object({
   servers: z.record(McpServerConfigSchema).default({}),
 });
 
+const SpecialistPresetOverrideSchema = z.object({
+  system_prompt: z.string().optional(),
+  allowed_tools: z.array(z.string()).optional(),
+  blocked_tools: z.array(z.string()).optional(),
+  default_model: z.string().optional(),
+  default_provider: z.string().optional(),
+  enabled: z.boolean().default(true),
+});
+
 const SelfImprovementConfigSchema = z.object({
   enabled: z.boolean().default(true),
   opus_provider: z.string().optional(),
@@ -283,6 +292,17 @@ const SelfImprovementConfigSchema = z.object({
   max_reflection_input_tokens: z.number().default(8000),
   approval_channel: z.string().default("discord"),
   routing_retrain_cron: z.string().default("0 4 * * 0"), // Sunday 4 AM
+  // 5.3 Critique Loop
+  critique_enabled: z.boolean().default(true),
+  critique_min_tier: z.number().default(3),
+  // 5.4 Gap Detection
+  gap_detection_enabled: z.boolean().default(true),
+  gap_detection_cron: z.string().default("0 2 1 * *"), // 1st of month 2 AM
+  // 5.7 Few-Shot Library
+  few_shot_enabled: z.boolean().default(true),
+  few_shot_harvest_cron: z.string().default("0 4 1 * *"), // 1st of month 4 AM
+  few_shot_min_score: z.number().default(4),
+  few_shot_min_tool_calls: z.number().default(2),
 });
 
 const TasksConfigSchema = z.object({
@@ -329,6 +349,7 @@ const AppConfigSchema = z.object({
   mcp: McpConfigSchema.optional(),
   self_improvement: SelfImprovementConfigSchema.optional(),
   tasks: TasksConfigSchema.optional(),
+  specialists: z.record(SpecialistPresetOverrideSchema).optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -345,6 +366,8 @@ export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 export type McpConfig = z.infer<typeof McpConfigSchema>;
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 export type McpTransport = z.infer<typeof McpTransportSchema>;
+export type SpecialistPresetOverride = z.infer<typeof SpecialistPresetOverrideSchema>;
+export type SpecialistsConfig = Record<string, SpecialistPresetOverride>;
 
 /**
  * Load configuration from YAML file with environment variable overrides.

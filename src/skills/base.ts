@@ -34,6 +34,11 @@ export interface SkillToolDefinition extends LLMToolDefinition {
    * Tools with requiresConfirmation=true are treated as tier 3 if permissionTier is unset.
    */
   permissionTier?: PermissionTier;
+  /**
+   * If true, this tool will be critiqued by CritiqueService even if its tier
+   * is below critique_min_tier. Useful for lower-tier tools that have external side effects.
+   */
+  requiresCritique?: boolean;
 }
 
 /** The contract every skill must implement. */

@@ -21,7 +21,8 @@ export type AuditEventType =
   | "confirmation_resolved"
   | "session_start"
   | "session_end"
-  | "error";
+  | "error"
+  | "critique";
 
 export interface AuditRecord {
   eventType: AuditEventType;

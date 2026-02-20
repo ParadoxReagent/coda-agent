@@ -310,6 +310,13 @@ export class SkillRegistry {
     return this.getToolPermissionTier(toolName) >= 3;
   }
 
+  /** Get the full tool definition for a registered tool, or undefined if not found. */
+  getToolDefinition(toolName: string): import("./base.js").SkillToolDefinition | undefined {
+    const skillName = this.toolToSkill.get(toolName);
+    if (!skillName) return undefined;
+    return this.skills.get(skillName)?.tools.get(toolName);
+  }
+
   /** Check if a tool is marked as sensitive (accesses private data). */
   isSensitiveTool(toolName: string): boolean {
     const skillName = this.toolToSkill.get(toolName);
