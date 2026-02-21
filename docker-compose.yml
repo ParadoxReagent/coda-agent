@@ -13,6 +13,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - coda-internal
+      - coda-browser-sandbox
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,7 +135,10 @@ networks:
     driver: bridge
   # Internet-only sandbox network for ephemeral browser containers.
   # NOT connected to coda-internal — browser containers cannot reach Redis, Postgres, etc.
+  # name: forces Compose to use this exact name instead of "{project}_coda-browser-sandbox",
+  # since the browser skill spawns containers via Docker socket and references this name directly.
   coda-browser-sandbox:
+    name: coda-browser-sandbox
     driver: bridge
     internal: false
 

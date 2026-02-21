@@ -74,6 +74,55 @@ export class BrowserService {
   }
 
   /**
+   * Pre-flight: verify image and network exist before attempting MCP connection.
+   * Provides actionable errors instead of the opaque McpError(ConnectionClosed=-32000)
+   * that results when docker exits before completing the MCP handshake.
+   */
+  private async preflight(): Promise<void> {
+    // Use socket-aware env but strip DOCKER_HOST if it's set — it may point to a
+    // remote daemon that doesn't have the local image/network. The socket mount
+    // (/var/run/docker.sock) is always the correct path inside the container.
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && k !== "DOCKER_HOST") env[k] = v;
+    }
+    if (this.config.docker_socket !== "/var/run/docker.sock") {
+      env.DOCKER_HOST = `unix://${this.config.docker_socket}`;
+    }
+
+    try {
+      await execFileAsync("docker", ["image", "inspect", "--format", "{{.Id}}", this.config.image], { env });
+    } catch (err: unknown) {
+      const detail = (err as NodeJS.ErrnoException & { stderr?: string; stdout?: string }).stderr?.trim()
+        || (err as Error).message;
+      this.logger.error({ dockerError: detail, image: this.config.image }, "Docker image inspect failed");
+      throw new Error(
+        `Browser image "${this.config.image}" not found on this host (docker said: ${detail}). ` +
+          `Build it with: docker compose --profile mcp-build build`
+      );
+    }
+
+    try {
+      await execFileAsync("docker", ["network", "inspect", "--format", "{{.Id}}", this.config.sandbox_network], { env });
+    } catch {
+      // Network not found — attempt to create it before failing
+      this.logger.warn({ network: this.config.sandbox_network }, "Sandbox network not found; attempting to create it");
+      try {
+        await execFileAsync("docker", ["network", "create", this.config.sandbox_network], { env });
+        this.logger.info({ network: this.config.sandbox_network }, "Sandbox network created");
+      } catch (createErr: unknown) {
+        const detail = (createErr as NodeJS.ErrnoException & { stderr?: string }).stderr?.trim()
+          || (createErr as Error).message;
+        this.logger.error({ dockerError: detail, network: this.config.sandbox_network }, "Docker network create failed");
+        throw new Error(
+          `Browser sandbox network "${this.config.sandbox_network}" not found and could not be created (docker said: ${detail}). ` +
+            `Run: docker compose up`
+        );
+      }
+    }
+  }
+
+  /**
    * Create a new browser session: spawn container, connect MCP client, discover tools.
    */
   async createSession(userId?: string): Promise<CreateSessionResult> {
@@ -83,6 +132,9 @@ export class BrowserService {
           `Call browser_close on an existing session first.`
       );
     }
+
+    // Pre-flight: verify image and network exist before attempting MCP connection.
+    await this.preflight();
 
     const sessionId = randomBytes(8).toString("hex");
     const containerName = `coda-browser-${sessionId}`;
@@ -169,7 +221,7 @@ export class BrowserService {
       const result = await session.client.callTool(toolName, args);
       session.lastActivityAt = Date.now();
       if (result.isError) {
-        this.logger.warn({ sessionId, toolName }, "Playwright MCP tool returned error");
+        this.logger.warn({ sessionId, toolName, errorContent: result.content }, "Playwright MCP tool returned error");
       }
       return result;
     } catch (err) {
@@ -282,6 +334,7 @@ export class BrowserService {
       "run",
       "-i", // Keep stdin open for MCP stdio transport
       "--rm", // Auto-remove container on exit
+      "--init",
       "--name", containerName,
       // Network: internet-only sandbox — no access to coda-internal
       "--network", this.config.sandbox_network,
@@ -291,11 +344,13 @@ export class BrowserService {
       "--pids-limit", "512",
       // Security hardening
       "--cap-drop=ALL",
+      "--cap-add=SYS_PTRACE",    // Required by Chromium crashpad handler
       "--security-opt=no-new-privileges",
       "--read-only",
       // Writable tmpfs for browser temp files and profile
-      "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-      "--tmpfs", "/home/browser:rw,noexec,nosuid,size=128m",
+      "--tmpfs", "/tmp:rw,nosuid,size=256m",
+      "--tmpfs", "/var/tmp:rw,nosuid,size=64m",
+      "--tmpfs", "/home/node:rw,nosuid,size=128m",
       // Shared memory required by Chromium
       "--shm-size", "256m",
       this.config.image,

@@ -283,7 +283,6 @@ export class BrowserSkill implements Skill {
       return JSON.stringify({
         success: true,
         session_id: result.sessionId,
-        available_tools: result.availableTools,
         message:
           `Browser session started (id: ${result.sessionId}). ` +
           `Use this session_id for subsequent browser tools. ` +
@@ -324,7 +323,7 @@ export class BrowserSkill implements Skill {
     const fullPage = (input.full_page as boolean) ?? false;
 
     try {
-      const raw = await this.service.callToolRaw(sessionId, "browser_screenshot", { fullPage });
+      const raw = await this.service.callToolRaw(sessionId, "browser_take_screenshot", { type: "png", fullPage });
 
       // Extract image block if present and save to a temp file
       for (const block of raw.content) {
@@ -415,7 +414,7 @@ export class BrowserSkill implements Skill {
 
     try {
       const result = await this.service.callTool(sessionId, "browser_evaluate", {
-        expression: script,
+        function: `() => { ${script} }`,
       });
       return JSON.stringify({ success: !result.isError, result: result.content });
     } catch (err) {

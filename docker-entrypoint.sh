@@ -7,9 +7,15 @@ if [ -S /var/run/docker.sock ]; then
   DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null)
 
   if [ -n "$DOCKER_GID" ] && [ "$DOCKER_GID" != "0" ]; then
-    # Socket is owned by a non-root group - create matching group and add node user
-    addgroup -g "$DOCKER_GID" docker 2>/dev/null || true
-    addgroup node docker 2>/dev/null || true
+    # Find a group that already has this GID (e.g. docker-cli package may have
+    # pre-created a "docker" group with a different GID, making addgroup -g fail).
+    SOCK_GROUP=$(awk -F: '$3 == '"$DOCKER_GID"' { print $1; exit }' /etc/group)
+    if [ -z "$SOCK_GROUP" ]; then
+      # No existing group has this GID — create one
+      addgroup -g "$DOCKER_GID" dockersock
+      SOCK_GROUP=dockersock
+    fi
+    addgroup node "$SOCK_GROUP" 2>/dev/null || true
   else
     # Socket is owned by root (GID 0) - add node to root group
     addgroup node root 2>/dev/null || true

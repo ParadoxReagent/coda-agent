@@ -153,10 +153,15 @@ export class CritiqueService {
   }
 
   private parseResponse(text: string): CritiqueResult {
-    const cleaned = text
+    // Strip markdown fences, then extract the first complete JSON object
+    // to handle models that prefix output with words like "thought".
+    const stripped = text
       .replace(/^```(?:json)?\n?/m, "")
       .replace(/\n?```$/m, "")
       .trim();
+    const start = stripped.indexOf("{");
+    const end = stripped.lastIndexOf("}");
+    const cleaned = start !== -1 && end > start ? stripped.slice(start, end + 1) : stripped;
 
     try {
       const parsed = JSON.parse(cleaned) as Record<string, unknown>;
