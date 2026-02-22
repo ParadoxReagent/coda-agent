@@ -1,19 +1,27 @@
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { writeFile, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { McpClientWrapper } from "../../integrations/mcp/client.js";
+import type { Browser, BrowserContext, Page } from "playwright";
 import type { BrowserConfig } from "../../utils/config.js";
 import type { Logger } from "../../utils/logger.js";
 
 const execFileAsync = promisify(execFile);
 
+/** Lazy import playwright — avoids hard-requiring it at module load time. */
+async function getChromium() {
+  const { chromium } = await import("playwright");
+  return chromium;
+}
+
 interface BrowserSession {
   id: string;
-  containerName: string;
-  client: McpClientWrapper;
+  containerName?: string; // docker mode only
+  browser: Browser;
+  context: BrowserContext;
+  page: Page;
   lastActivityAt: number;
   createdAt: number;
   userId?: string;
@@ -22,24 +30,23 @@ interface BrowserSession {
 
 export interface CreateSessionResult {
   sessionId: string;
-  availableTools: string[];
 }
 
-export interface CallToolResult {
-  content: string;
-  isError: boolean;
-}
-
-export interface CallToolRawResult {
-  content: Array<{ type: string; [key: string]: unknown }>;
-  isError: boolean;
+/** A parsed entry from page.ariaSnapshot() output. */
+interface AriaEntry {
+  depth: number;
+  role: string;
+  name: string;
 }
 
 /**
- * BrowserService manages the lifecycle of ephemeral Playwright MCP containers.
+ * BrowserService manages the lifecycle of browser sessions backed by Playwright.
  *
- * Each session maps to one Docker container running the Playwright MCP server.
- * Communication is via stdio (docker run -i → McpClientWrapper → StdioClientTransport).
+ * **Docker mode** (production): each session spawns an isolated container running
+ * `playwright-server.js`. The host connects via WebSocket to the container IP.
+ *
+ * **Host mode** (development): Chromium is launched directly via `chromium.launch()`.
+ * Requires `npx playwright install chromium` to be run once on the host.
  */
 export class BrowserService {
   private sessions: Map<string, BrowserSession> = new Map();
@@ -73,58 +80,7 @@ export class BrowserService {
     this.logger.debug({ count: ids.length }, "Browser service stopped");
   }
 
-  /**
-   * Pre-flight: verify image and network exist before attempting MCP connection.
-   * Provides actionable errors instead of the opaque McpError(ConnectionClosed=-32000)
-   * that results when docker exits before completing the MCP handshake.
-   */
-  private async preflight(): Promise<void> {
-    // Use socket-aware env but strip DOCKER_HOST if it's set — it may point to a
-    // remote daemon that doesn't have the local image/network. The socket mount
-    // (/var/run/docker.sock) is always the correct path inside the container.
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (v !== undefined && k !== "DOCKER_HOST") env[k] = v;
-    }
-    if (this.config.docker_socket !== "/var/run/docker.sock") {
-      env.DOCKER_HOST = `unix://${this.config.docker_socket}`;
-    }
-
-    try {
-      await execFileAsync("docker", ["image", "inspect", "--format", "{{.Id}}", this.config.image], { env });
-    } catch (err: unknown) {
-      const detail = (err as NodeJS.ErrnoException & { stderr?: string; stdout?: string }).stderr?.trim()
-        || (err as Error).message;
-      this.logger.error({ dockerError: detail, image: this.config.image }, "Docker image inspect failed");
-      throw new Error(
-        `Browser image "${this.config.image}" not found on this host (docker said: ${detail}). ` +
-          `Build it with: docker compose --profile mcp-build build`
-      );
-    }
-
-    try {
-      await execFileAsync("docker", ["network", "inspect", "--format", "{{.Id}}", this.config.sandbox_network], { env });
-    } catch {
-      // Network not found — attempt to create it before failing
-      this.logger.warn({ network: this.config.sandbox_network }, "Sandbox network not found; attempting to create it");
-      try {
-        await execFileAsync("docker", ["network", "create", this.config.sandbox_network], { env });
-        this.logger.info({ network: this.config.sandbox_network }, "Sandbox network created");
-      } catch (createErr: unknown) {
-        const detail = (createErr as NodeJS.ErrnoException & { stderr?: string }).stderr?.trim()
-          || (createErr as Error).message;
-        this.logger.error({ dockerError: detail, network: this.config.sandbox_network }, "Docker network create failed");
-        throw new Error(
-          `Browser sandbox network "${this.config.sandbox_network}" not found and could not be created (docker said: ${detail}). ` +
-            `Run: docker compose up`
-        );
-      }
-    }
-  }
-
-  /**
-   * Create a new browser session: spawn container, connect MCP client, discover tools.
-   */
+  /** Create a new browser session. */
   async createSession(userId?: string): Promise<CreateSessionResult> {
     if (this.sessions.size >= this.config.max_sessions) {
       throw new Error(
@@ -133,56 +89,41 @@ export class BrowserService {
       );
     }
 
-    // Pre-flight: verify image and network exist before attempting MCP connection.
-    await this.preflight();
-
     const sessionId = randomBytes(8).toString("hex");
-    const containerName = `coda-browser-${sessionId}`;
-
-    // Create a temp dir for screenshots belonging to this session
     const screenshotDir = await mkdtemp(join(tmpdir(), `coda-browser-${sessionId}-`));
 
-    this.logger.info({ sessionId, containerName, userId }, "Creating browser session");
+    this.logger.info({ sessionId, userId, mode: this.config.mode }, "Creating browser session");
 
-    const mcpConfig = {
-      enabled: true,
-      transport: {
-        type: "stdio" as const,
-        command: "docker",
-        args: this.buildDockerArgs(containerName),
-        env: this.buildDockerEnv(),
-      },
-      timeout_ms: this.config.tool_timeout_ms,
-      tool_timeout_ms: this.config.tool_timeout_ms,
-      tool_allowlist: undefined,
-      tool_blocklist: [] as string[],
-      requires_confirmation: [] as string[],
-      sensitive_tools: [] as string[],
-      description: `Browser session ${sessionId}`,
-      max_response_size: 100_000,
-      auto_refresh_tools: false,
-      startup_mode: "eager" as const,
-      idle_timeout_minutes: undefined,
-    };
-
-    const client = new McpClientWrapper(`browser-${sessionId}`, mcpConfig);
+    let browser: Browser;
+    let containerName: string | undefined;
 
     try {
-      await client.connect();
-      this.logger.debug({ sessionId }, "MCP client connected to browser container");
+      const chromium = await getChromium();
 
-      const tools = await client.listTools();
-      const availableTools = tools.map((t) => t.name);
+      if (this.config.mode === "host") {
+        browser = await chromium.launch({
+          headless: this.config.headless,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          timeout: this.config.connect_timeout_ms,
+        });
+      } else {
+        // Docker mode: spin up an isolated container and connect via WebSocket
+        containerName = `coda-browser-${sessionId}`;
+        await this.preflight();
+        await this.startContainer(containerName);
+        const containerIp = await this.waitForContainerIp(containerName);
+        browser = await this.connectWithRetry(chromium, containerIp, containerName);
+      }
 
-      this.logger.info(
-        { sessionId, toolCount: availableTools.length },
-        "Browser session ready"
-      );
+      const context = await browser.newContext();
+      const page = await context.newPage();
 
       const session: BrowserSession = {
         id: sessionId,
         containerName,
-        client,
+        browser,
+        context,
+        page,
         lastActivityAt: Date.now(),
         createdAt: Date.now(),
         userId,
@@ -190,90 +131,101 @@ export class BrowserService {
       };
       this.sessions.set(sessionId, session);
 
-      return { sessionId, availableTools };
+      this.logger.info({ sessionId }, "Browser session ready");
+      return { sessionId };
     } catch (err) {
-      this.logger.error({ error: err, containerName }, "Failed to start browser container");
-      try {
-        await client.disconnect();
-        await this.forceRemoveContainer(containerName);
-        await rm(screenshotDir, { recursive: true, force: true });
-      } catch {
-        // best-effort cleanup
+      this.logger.error({ error: err, containerName }, "Failed to start browser session");
+      if (containerName) {
+        await this.forceRemoveContainer(containerName).catch(() => {});
       }
+      await rm(screenshotDir, { recursive: true, force: true }).catch(() => {});
       throw new Error(
         `Failed to start browser session: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
 
-  /**
-   * Call an MCP tool on an active session and return serialized text content.
-   */
-  async callTool(
-    sessionId: string,
-    toolName: string,
-    args: Record<string, unknown>
-  ): Promise<CallToolResult> {
+  /** Navigate the session's page to a URL. */
+  async navigate(sessionId: string, url: string): Promise<void> {
     const session = this.getActiveSession(sessionId);
     session.lastActivityAt = Date.now();
-
-    try {
-      const result = await session.client.callTool(toolName, args);
-      session.lastActivityAt = Date.now();
-      if (result.isError) {
-        this.logger.warn({ sessionId, toolName, errorContent: result.content }, "Playwright MCP tool returned error");
-      }
-      return result;
-    } catch (err) {
-      this.logger.error({ error: err, sessionId, toolName }, "MCP tool call failed");
-      if (!session.client.isConnected()) {
-        await this.destroySession(sessionId);
-      }
-      throw err;
-    }
+    await session.page.goto(url, {
+      timeout: this.config.tool_timeout_ms,
+      waitUntil: "domcontentloaded",
+    });
+    session.lastActivityAt = Date.now();
   }
 
   /**
-   * Call an MCP tool and return raw content blocks.
-   * Used for screenshot handling to preserve image data.
+   * Get a human-readable accessibility snapshot of the current page.
+   * Returns locator strings the LLM can use directly in browser_interact.
    */
-  async callToolRaw(
-    sessionId: string,
-    toolName: string,
-    args: Record<string, unknown>
-  ): Promise<CallToolRawResult> {
+  async getContent(sessionId: string): Promise<string> {
     const session = this.getActiveSession(sessionId);
     session.lastActivityAt = Date.now();
 
-    try {
-      const result = await session.client.callToolRaw(toolName, args);
-      session.lastActivityAt = Date.now();
-      return result;
-    } catch (err) {
-      this.logger.error({ error: err, sessionId, toolName }, "MCP raw tool call failed");
-      if (!session.client.isConnected()) {
-        await this.destroySession(sessionId);
-      }
-      throw err;
+    const [title, url, ariaYaml] = await Promise.all([
+      session.page.title(),
+      Promise.resolve(session.page.url()),
+      session.page.locator("body").ariaSnapshot(),
+    ]);
+
+    const lines: string[] = [];
+    lines.push(`Page: ${title}`);
+    lines.push(`URL: ${url}`);
+    lines.push("");
+
+    const entries = this.parseAriaSnapshot(ariaYaml);
+    for (const entry of entries) {
+      const indent = "  ".repeat(Math.min(entry.depth, 4));
+      const locator = this.buildLocator(entry.role, entry.name);
+      lines.push(`${indent}[${entry.role}] "${entry.name}" → ${locator}`);
     }
+
+    if (lines.length <= 3) {
+      lines.push("(No interactive elements found — page may still be loading)");
+    }
+
+    session.lastActivityAt = Date.now();
+    return lines.join("\n");
   }
 
-  /**
-   * Save base64 image data to the session's screenshot directory.
-   * Returns the file path.
-   */
-  async saveScreenshot(sessionId: string, base64Data: string, mimeType?: string): Promise<string> {
+  /** Take a screenshot and save it to the session's temp directory. Returns the file path. */
+  async screenshot(sessionId: string, fullPage: boolean): Promise<string> {
     const session = this.getActiveSession(sessionId);
-    const ext = mimeType === "image/jpeg" ? "jpg" : "png";
-    const filename = `screenshot-${Date.now()}.${ext}`;
+    session.lastActivityAt = Date.now();
+    const filename = `screenshot-${Date.now()}.png`;
     const filePath = join(session.screenshotDir, filename);
-    await writeFile(filePath, Buffer.from(base64Data, "base64"));
+    await session.page.screenshot({ path: filePath, fullPage, timeout: this.config.tool_timeout_ms });
+    session.lastActivityAt = Date.now();
     return filePath;
   }
 
-  /**
-   * Destroy a session: disconnect MCP client, force-remove container, cleanup temp files.
-   */
+  /** Click an element identified by a Playwright selector. */
+  async click(sessionId: string, selector: string): Promise<void> {
+    const session = this.getActiveSession(sessionId);
+    session.lastActivityAt = Date.now();
+    await session.page.locator(selector).first().click({ timeout: this.config.tool_timeout_ms });
+    session.lastActivityAt = Date.now();
+  }
+
+  /** Fill a text input identified by a Playwright selector. */
+  async fill(sessionId: string, selector: string, text: string): Promise<void> {
+    const session = this.getActiveSession(sessionId);
+    session.lastActivityAt = Date.now();
+    await session.page.locator(selector).first().fill(text, { timeout: this.config.tool_timeout_ms });
+    session.lastActivityAt = Date.now();
+  }
+
+  /** Select an option in a <select> element identified by a Playwright selector. */
+  async select(sessionId: string, selector: string, value: string): Promise<void> {
+    const session = this.getActiveSession(sessionId);
+    session.lastActivityAt = Date.now();
+    await session.page.locator(selector).first().selectOption(value, { timeout: this.config.tool_timeout_ms });
+    session.lastActivityAt = Date.now();
+  }
+
+  /** Destroy a session: close browser, remove container (docker mode), clean temp files. */
   async destroySession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -284,17 +236,21 @@ export class BrowserService {
     );
     this.sessions.delete(sessionId);
 
-    // Disconnect MCP client (closes stdin → container exits → --rm removes it)
     try {
-      await session.client.disconnect();
+      await session.context.close();
     } catch (err) {
-      this.logger.warn({ error: err, sessionId }, "Error disconnecting MCP client");
+      this.logger.warn({ error: err, sessionId }, "Error closing browser context");
+    }
+    try {
+      await session.browser.close();
+    } catch (err) {
+      this.logger.warn({ error: err, sessionId }, "Error closing browser");
     }
 
-    // Force-remove container as safety net (--rm may have already cleaned up)
-    await this.forceRemoveContainer(session.containerName);
+    if (session.containerName) {
+      await this.forceRemoveContainer(session.containerName);
+    }
 
-    // Clean up screenshot temp directory
     try {
       await rm(session.screenshotDir, { recursive: true, force: true });
     } catch {
@@ -319,7 +275,7 @@ export class BrowserService {
         `Browser session "${sessionId}" not found. Use browser_open to start a new session.`
       );
     }
-    if (!session.client.isConnected()) {
+    if (!session.browser.isConnected()) {
       // Async cleanup — don't await to avoid deadlock in error path
       this.destroySession(sessionId).catch(() => {});
       throw new Error(
@@ -329,14 +285,189 @@ export class BrowserService {
     return session;
   }
 
+  /**
+   * Parse the YAML-like output of page.ariaSnapshot() into structured entries.
+   * Only interactive/meaningful roles are included to keep output concise.
+   * ARIA snapshot format:
+   *   - document "Page title"
+   *     - heading "Welcome" [level=1]
+   *     - link "About Us"
+   *     - button "Sign In"
+   *     - textbox "Email"
+   */
+  private parseAriaSnapshot(yaml: string): AriaEntry[] {
+    const INTERACTIVE_ROLES = new Set([
+      "button", "link", "textbox", "searchbox", "checkbox", "radio",
+      "combobox", "listbox", "menuitem", "menuitemcheckbox", "menuitemradio",
+      "option", "tab", "heading", "img",
+    ]);
+
+    const entries: AriaEntry[] = [];
+    for (const rawLine of yaml.split("\n")) {
+      // Lines look like: "  - heading \"Welcome\" [level=1]"
+      const lineMatch = rawLine.match(/^(\s*)- (\w[\w-]*)\s+"([^"]*)"/);
+      if (!lineMatch) continue;
+      const indentStr = lineMatch[1] ?? "";
+      const role = lineMatch[2] ?? "";
+      const name = lineMatch[3] ?? "";
+      if (!INTERACTIVE_ROLES.has(role) || !name.trim()) continue;
+      const depth = Math.floor(indentStr.length / 2);
+      entries.push({ depth, role, name: name.trim() });
+    }
+    return entries;
+  }
+
+  /**
+   * Build a Playwright locator string for an accessibility role + name pair.
+   * Prefer role-based selectors which are more robust than CSS.
+   */
+  private buildLocator(role: string, name: string): string {
+    const escaped = name.replace(/"/g, '\\"');
+    switch (role) {
+      case "button":
+        return `button:has-text("${escaped}")`;
+      case "link":
+        return `a:has-text("${escaped}")`;
+      case "textbox":
+      case "searchbox":
+        // Try label-based first, then placeholder
+        return `input[aria-label="${escaped}"], input[placeholder="${escaped}"], textarea[aria-label="${escaped}"]`;
+      case "checkbox":
+        return `input[type="checkbox"][aria-label="${escaped}"]`;
+      case "radio":
+        return `input[type="radio"][aria-label="${escaped}"]`;
+      case "combobox":
+      case "listbox":
+        return `select[aria-label="${escaped}"]`;
+      case "heading":
+        return `h1:has-text("${escaped}"), h2:has-text("${escaped}"), h3:has-text("${escaped}")`;
+      case "tab":
+        return `[role="tab"]:has-text("${escaped}")`;
+      case "menuitem":
+      case "menuitemcheckbox":
+      case "menuitemradio":
+        return `[role="menuitem"]:has-text("${escaped}")`;
+      default:
+        return `[role="${role}"]:has-text("${escaped}")`;
+    }
+  }
+
+  /**
+   * Pre-flight: verify image and network exist before starting a container.
+   * Provides actionable errors instead of opaque connection failures.
+   */
+  private async preflight(): Promise<void> {
+    const env = this.buildDockerEnv();
+
+    try {
+      await execFileAsync("docker", ["image", "inspect", "--format", "{{.Id}}", this.config.image], { env });
+    } catch (err: unknown) {
+      const detail = (err as { stderr?: string }).stderr?.trim() || (err as Error).message;
+      throw new Error(
+        `Browser image "${this.config.image}" not found (docker said: ${detail}). ` +
+          `Build it with: docker compose --profile mcp-build build`
+      );
+    }
+
+    try {
+      await execFileAsync("docker", ["network", "inspect", "--format", "{{.Id}}", this.config.sandbox_network], { env });
+    } catch {
+      // Network not found — attempt to create it
+      this.logger.warn({ network: this.config.sandbox_network }, "Sandbox network not found; attempting to create it");
+      try {
+        await execFileAsync("docker", ["network", "create", this.config.sandbox_network], { env });
+        this.logger.info({ network: this.config.sandbox_network }, "Sandbox network created");
+      } catch (createErr: unknown) {
+        const detail = (createErr as { stderr?: string }).stderr?.trim() || (createErr as Error).message;
+        throw new Error(
+          `Browser sandbox network "${this.config.sandbox_network}" not found and could not be created: ${detail}`
+        );
+      }
+    }
+  }
+
+  /** Start the browser container in detached mode (-d). */
+  private async startContainer(containerName: string): Promise<void> {
+    const env = this.buildDockerEnv();
+    await execFileAsync("docker", this.buildDockerArgs(containerName), { env });
+    this.logger.debug({ containerName }, "Browser container started (detached)");
+  }
+
+  /**
+   * Poll docker inspect until the container has an IP on the sandbox network.
+   * The IP becomes available within ~100ms of `docker run -d` returning.
+   */
+  private async waitForContainerIp(containerName: string): Promise<string> {
+    const env = this.buildDockerEnv();
+    const format = `{{(index .NetworkSettings.Networks "${this.config.sandbox_network}").IPAddress}}`;
+    const deadline = Date.now() + this.config.connect_timeout_ms;
+
+    while (Date.now() < deadline) {
+      try {
+        const { stdout } = await execFileAsync(
+          "docker", ["inspect", "--format", format, containerName], { env }
+        );
+        const ip = stdout.trim();
+        if (ip && ip !== "<no value>") {
+          this.logger.debug({ containerName, ip }, "Got container IP");
+          return ip;
+        }
+      } catch {
+        // Container not ready yet
+      }
+      await this.sleep(300);
+    }
+
+    throw new Error(
+      `Timed out waiting for container "${containerName}" to get an IP on network "${this.config.sandbox_network}"`
+    );
+  }
+
+  /**
+   * Attempt to connect to the Playwright WebSocket server in the container,
+   * retrying up to config.connect_retries times with exponential back-off.
+   * The container's playwright-server.js listens at ws://<ip>:3000/playwright.
+   */
+  private async connectWithRetry(
+    chromium: Awaited<ReturnType<typeof getChromium>>,
+    containerIp: string,
+    containerName: string
+  ): Promise<Browser> {
+    const wsEndpoint = `ws://${containerIp}:3000/playwright`;
+    const retries = this.config.connect_retries;
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const browser = await chromium.connect(wsEndpoint, {
+          timeout: this.config.connect_timeout_ms,
+        });
+        this.logger.debug({ containerName, attempt }, "Connected to Playwright server");
+        return browser;
+      } catch (err) {
+        this.logger.warn(
+          { error: (err as Error).message, containerName, attempt, retries },
+          "Playwright connection attempt failed"
+        );
+        if (attempt < retries) {
+          await this.sleep(500 * attempt); // 500ms, 1s, 1.5s …
+        }
+      }
+    }
+
+    throw new Error(
+      `Failed to connect to Playwright server in container "${containerName}" after ${retries} attempts. ` +
+        `Endpoint: ws://${containerIp}:3000/playwright`
+    );
+  }
+
   private buildDockerArgs(containerName: string): string[] {
     return [
       "run",
-      "-i", // Keep stdin open for MCP stdio transport
-      "--rm", // Auto-remove container on exit
+      "-d",     // Detached — no stdin pipe needed (unlike MCP stdio transport)
+      "--rm",
       "--init",
       "--name", containerName,
-      // Network: internet-only sandbox — no access to coda-internal
+      // Internet-only sandbox network
       "--network", this.config.sandbox_network,
       // Resource limits
       "--memory", "1g",
@@ -348,38 +479,33 @@ export class BrowserService {
       "--security-opt=no-new-privileges",
       "--security-opt=seccomp=unconfined", // Chromium needs syscalls blocked by default seccomp
       "--read-only",
-      // Writable tmpfs for browser temp files and profile
+      // Writable tmpfs for browser temp files
       "--tmpfs", "/tmp:rw,nosuid,size=256m",
       "--tmpfs", "/var/tmp:rw,nosuid,size=64m",
-      "--tmpfs", "/home/node:rw,nosuid,size=128m",
+      "--tmpfs", "/home/pwuser:rw,nosuid,size=128m",
+      "--tmpfs", "/app/node_modules/.cache:rw,nosuid,size=32m",
       // Shared memory required by Chromium
       "--shm-size", "256m",
       this.config.image,
     ];
   }
 
-  private buildDockerEnv(): Record<string, string> | undefined {
+  private buildDockerEnv(): Record<string, string> {
+    const env = { ...(process.env as Record<string, string>) };
     if (this.config.docker_socket !== "/var/run/docker.sock") {
-      // Custom socket — include parent env so Docker CLI finds dependencies
-      return {
-        ...(process.env as Record<string, string>),
-        DOCKER_HOST: `unix://${this.config.docker_socket}`,
-      };
+      env.DOCKER_HOST = `unix://${this.config.docker_socket}`;
+    } else {
+      // Strip DOCKER_HOST so the CLI uses the default socket
+      delete env.DOCKER_HOST;
     }
-    // Default socket — inherit parent environment (undefined = inherit)
-    return undefined;
+    return env;
   }
 
   private async forceRemoveContainer(containerName: string): Promise<void> {
     try {
-      const env = { ...(process.env as Record<string, string>) };
-      if (this.config.docker_socket !== "/var/run/docker.sock") {
-        env.DOCKER_HOST = `unix://${this.config.docker_socket}`;
-      }
-      await execFileAsync("docker", ["rm", "-f", containerName], { env });
+      await execFileAsync("docker", ["rm", "-f", containerName], { env: this.buildDockerEnv() });
       this.logger.debug({ containerName }, "Container force-removed");
     } catch {
-      // Expected if --rm already cleaned up
       this.logger.debug({ containerName }, "Container already removed (expected with --rm)");
     }
   }
@@ -402,5 +528,9 @@ export class BrowserService {
       );
       await this.destroySession(id);
     }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

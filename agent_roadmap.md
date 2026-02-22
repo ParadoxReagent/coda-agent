@@ -16,7 +16,7 @@
 | **Agent Skills** | web-research, pdf, skill-creator, algorithmic-art, mcp-builder, slack-gif-creator, frontend-design (7 total) |
 | **Integrations** | MCP (stdio + HTTP), n8n, Firecrawl, Weather, Discord, Slack (6 total) |
 | **New (Phase 1)** | Audit log, solution_patterns table, routing_decisions table, permission tiers, config hot-reload, MessageSender |
-| **New (Phase 2)** | Browser automation (Playwright MCP in Docker sandbox), SSRF protection, callToolRaw on McpClientWrapper |
+| **New (Phase 2)** | Browser automation (Playwright direct API in Docker sandbox), SSRF protection; MCP → direct WebSocket API replacement |
 | **New (Phase 4)** | Self-assessments, improvement_proposals, prompt_versions, task_state tables; SelfImprovementSkill, TaskExecutionSkill, PromptManager, LearnedTierClassifier, SelfAssessmentService |
 
 ---
@@ -131,17 +131,28 @@ Auto-trigger structured memory writes on significant task completion.
 *Theme: Add the highest-impact capability (browser) and the safety layer they require.*
 
 ### ✅ 2.1 Browser Automation Skill
-Playwright MCP in ephemeral Docker containers (stdio transport via McpClientWrapper). Navigate, click, fill forms, screenshot — with layered security isolation.
+Playwright direct Node.js API in ephemeral Docker containers (WebSocket transport). Navigate, click, fill forms, screenshot — with layered security isolation.
 
 **Implemented:**
-- `BrowserService` (`src/skills/browser/service.ts`): container lifecycle + MCP client management, idle timeout monitor (30s polling), max-session enforcement
-- `BrowserSkill` (`src/skills/browser/skill.ts`): 8 tools with permission tiers, SSRF URL validation, screenshot→file conversion
-- `src/skills/browser/Dockerfile`: `mcr.microsoft.com/playwright` base + `@playwright/mcp` installed, non-root `browser` user
-- `BrowserConfigSchema` added to `config.ts`; env overrides `BROWSER_ENABLED`, `BROWSER_IMAGE`
+- `BrowserService` (`src/skills/browser/service.ts`): container lifecycle + direct Playwright API, idle timeout monitor (30s polling), max-session enforcement. Two modes: docker (production) and host (dev).
+- `BrowserSkill` (`src/skills/browser/skill.ts`): 6 tools with permission tiers (reduced from 8 — `browser_click`/`browser_type` merged into `browser_interact`, `browser_evaluate` removed), SSRF URL validation, direct file write for screenshots.
+- `src/skills/browser/playwright-server.js`: Node.js WebSocket server running in the Docker container (`chromium.launchServer()` on port 3000/playwright).
+- `src/skills/browser/Dockerfile`: `mcr.microsoft.com/playwright:v1.50.0-noble` base + playwright npm package installed.
+- `BrowserConfigSchema` extended in `config.ts`: added `mode`, `connect_timeout_ms`, `connect_retries`, `headless` fields; env overrides `BROWSER_ENABLED`, `BROWSER_IMAGE`
 - `coda-browser-sandbox` Docker network added to `docker-compose.yml` (`internal: false`)
-- `callToolRaw` added to `McpClientWrapper` for binary image content handling
-- Rate limit: 20 browser tool calls / hour
-- `src/skills/browser/{Dockerfile,types.ts,service.ts,skill.ts,index.ts}`
+- `src/skills/browser/{Dockerfile,playwright-server.js,types.ts,service.ts,skill.ts,index.ts}`
+
+**Reliability improvements over MCP approach:** No more `McpError(ConnectionClosed=-32000)` failures — MCP stdio protocol layer removed. AbortController signals replaced by native Playwright timeouts. Docker mode uses `-d` (detached) instead of `-i` (interactive stdin). Connection retries with exponential back-off.
+
+### ✅ 2.1.1 Browser MCP → Direct Playwright API Replacement
+Replaced Playwright MCP protocol layer (stdio over Docker) with direct Playwright Node.js API.
+
+**Changes:**
+- `service.ts`: `McpClientWrapper` → `Browser`/`BrowserContext`/`Page` from `playwright`; docker containers connect via WebSocket (`ws://container-ip:3000/playwright`); host mode uses `chromium.launch()` directly
+- `skill.ts`: 8 tools → 6 tools; `browser_interact` replaces `browser_click`/`browser_type`; `browser_evaluate` removed; `browser_open` accepts optional `url` param
+- `playwright-server.js`: new Docker entrypoint using `chromium.launchServer({ port: 3000, wsPath: '/playwright' })`
+- `Dockerfile`: base changed from `mcr.microsoft.com/playwright/mcp:latest` to `mcr.microsoft.com/playwright:v1.50.0-noble`
+- `config.ts`/`config.yaml`/`config.example.yaml`: new `mode`, `connect_timeout_ms`, `connect_retries`, `headless` fields
 
 **Security layers**: `coda-browser-sandbox` network (no `coda-internal` access) · private IP blocklist (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x) · `--cap-drop=ALL` · `--read-only` + tmpfs · `--no-new-privileges` · 1g/1CPU/512PID · `--rm` ephemeral · audit logged · critique on navigate
 
@@ -369,7 +380,7 @@ Monthly Opus harvests best interactions from audit log into `solution_patterns` 
 | 6 | Message sender | ✅ Done | S | All proactive features |
 | 7 | Hybrid memory MMR | ✅ Done | M | Better retrieval |
 | 8 | Memory write policy | ✅ Done | S-M | Systematic learning |
-| 9 | Browser automation | 🔲 Todo | L | Web interaction |
+| 9 | Browser automation | ✅ Done | L | Web interaction |
 | 10 | Telegram | 🔲 Todo | S-M | Mobile interface |
 | 11 | HA integration | 🔲 Todo | M-L | Home awareness |
 | 12 | Morning briefing | 🔲 Todo | M | Daily proactive summary |

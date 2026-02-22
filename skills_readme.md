@@ -236,26 +236,49 @@ The container has access to files in the mounted working directory at `/workspac
 
 ### Browser Automation
 
-Secure browser automation via Playwright running in ephemeral Docker containers. Unlike Firecrawl (read-only scraping), the browser skill can log into portals, fill forms, click buttons, and interact with single-page apps. Containers are network-isolated from coda's internal services and destroyed immediately when sessions end.
+Secure browser automation via Playwright's direct Node.js API in ephemeral Docker containers. Unlike Firecrawl (read-only scraping), the browser skill can log into portals, fill forms, click buttons, and interact with single-page apps. The direct API removes the fragile MCP protocol layer while keeping the same security model.
 
 | Tool | Tier | Description |
 |------|------|-------------|
-| `browser_open` | 2 | Start a new isolated browser session; returns a `session_id` |
+| `browser_open` | 2 | Start a new isolated browser session; optionally navigate to a starting URL; returns `session_id` |
 | `browser_navigate` | 2 | Navigate to a URL (SSRF-protected; critique enabled) |
-| `browser_get_content` | 1 | Accessibility snapshot of the page (element refs for click/type) |
+| `browser_get_content` | 1 | Accessibility snapshot of the page with Playwright locator strings |
+| `browser_interact` | 2 | Click, type, or select — unified interaction (sensitive: may contain credentials) |
 | `browser_screenshot` | 1 | Take a screenshot; saves to temp file and returns path |
-| `browser_click` | 2 | Click an element by ref from snapshot |
-| `browser_type` | 2 | Type text into a form field by ref (sensitive — may contain credentials) |
-| `browser_evaluate` | 3 | Execute JavaScript in page context (requires confirmation) |
 | `browser_close` | 0 | Destroy the session and container |
+
+**`browser_get_content` output format** — locator strings the LLM can use directly in `browser_interact`:
+
+```
+Page: Example.com
+URL: https://example.com
+
+[heading] "Welcome"        → h1:has-text("Welcome")
+[link] "About Us"          → a:has-text("About Us")
+[button] "Sign In"         → button:has-text("Sign In")
+[textbox] "Email"          → input[aria-label="Email"], input[placeholder="Email"], ...
+```
+
+**`browser_interact` actions:**
+- `click` — click a button, link, or any element
+- `type` — fill a text input (clears existing value)
+- `select` — choose an option from a `<select>` dropdown
 
 **Typical workflow:**
 
 ```
-browser_open → browser_navigate(url) → browser_get_content
-  → browser_click(ref from snapshot) → browser_type(ref, text)
+browser_open(url?) → browser_get_content
+  → browser_interact(action=click, selector=...)
+  → browser_interact(action=type, selector=..., value=...)
   → browser_screenshot → browser_close
 ```
+
+**Two connection modes:**
+
+| Mode | Use case | How it works |
+|------|----------|--------------|
+| `docker` (default) | Production | Spawns isolated container; host connects via WebSocket to container IP |
+| `host` | Development | Launches Chromium directly via `chromium.launch()` — no Docker required |
 
 **Security model (defense in depth):**
 
@@ -265,29 +288,43 @@ browser_open → browser_navigate(url) → browser_get_content
 | SSRF | Hardcoded private IP blocklist (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x, localhost) + configurable blocklist |
 | Container | `--cap-drop=ALL`, `--security-opt=no-new-privileges`, `--read-only`, tmpfs for writable dirs |
 | Resources | Memory 1g, CPU 1, PID 512, SHM 256m |
-| Lifecycle | `--rm` flag + auto-destroy on idle timeout + cleanup in `finally` blocks |
-| Rate limiting | 20 browser tool calls / hour |
+| Lifecycle | `--rm` flag + auto-destroy on idle timeout + `browser.close()` on session end |
 | Audit | All tool calls logged via AuditService |
 
-**Setup:**
+**Setup (docker mode):**
 
-1. Build the image: `docker compose --profile browser-build build`
+1. Build the image: `docker compose --profile mcp-build build`
 2. Enable in config:
 
 ```yaml
 browser:
   enabled: true
+  mode: "docker"
   image: "coda-browser-sandbox"
   sandbox_network: "coda-browser-sandbox"
   max_sessions: 3
   session_timeout_seconds: 300
+  connect_timeout_ms: 15000
+  connect_retries: 3
+```
+
+**Setup (host mode — development only):**
+
+```bash
+npx playwright install chromium
+```
+```yaml
+browser:
+  enabled: true
+  mode: "host"
+  headless: true  # set false to see the browser window
 ```
 
 **Environment variable overrides:**
 - `BROWSER_ENABLED=true|false`
 - `BROWSER_IMAGE=coda-browser-sandbox`
 
-**Requirements:**
+**Requirements (docker mode):**
 - Docker socket mounted (`/var/run/docker.sock`)
 - `coda-browser-sandbox` image built (see above)
 - `coda-browser-sandbox` Docker network created (auto-created by `docker compose up`)
@@ -312,7 +349,7 @@ Specialist agents are domain-focused sub-agents defined entirely by files in `sr
 | `lab` | 100 000 | Code execution, debugging, technical research |
 | `planner` | 40 000 | Task decomposition, scheduling, dependency analysis |
 
-The `research` agent has access to both Firecrawl (fast, read-only scraping) and browser tools (`browser_open`, `browser_navigate`, `browser_screenshot`, `browser_get_content`, `browser_click`, `browser_close`) for pages that require JavaScript rendering, click interactions, or pagination. `browser_type` and `browser_evaluate` are excluded — the research agent does not handle credentials or arbitrary JS execution.
+The `research` agent has access to both Firecrawl (fast, read-only scraping) and browser tools (`browser_open`, `browser_navigate`, `browser_screenshot`, `browser_get_content`, `browser_interact`) for pages that require JavaScript rendering, click interactions, or pagination.
 
 ---
 

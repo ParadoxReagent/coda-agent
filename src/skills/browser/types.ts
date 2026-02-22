@@ -4,7 +4,13 @@
  */
 export type { BrowserConfig } from "../../utils/config.js";
 
-/** Public session info returned to callers (no internal MCP client references). */
+/** Browser connection mode. */
+export type BrowserMode = "docker" | "host";
+
+/** Actions supported by browser_interact. */
+export type InteractionAction = "click" | "type" | "select";
+
+/** Public session info returned to callers (no internal Playwright references). */
 export interface BrowserSessionInfo {
   id: string;
   createdAt: number;
