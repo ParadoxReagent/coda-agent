@@ -1,6 +1,4 @@
-import { Telegraf, type Context } from "telegraf";
-import { message } from "telegraf/filters";
-import { Input } from "telegraf";
+import { Bot, type Context, InputFile } from "grammy";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -33,7 +31,7 @@ function chunkResponse(text: string, size: number): string[] {
 }
 
 export class TelegramBot {
-  private bot: Telegraf;
+  private bot: Bot;
   private config: TelegramBotConfig;
   private orchestrator: Orchestrator;
   private logger: Logger;
@@ -49,12 +47,12 @@ export class TelegramBot {
     this.logger = logger;
     this.allowedUserIds = new Set(config.allowedUserIds);
 
-    this.bot = new Telegraf(config.botToken);
+    this.bot = new Bot(config.botToken);
     this.setupHandlers();
   }
 
   async start(): Promise<void> {
-    this.bot.launch();
+    this.bot.start();
     this.logger.info("Telegram bot connected (long polling)");
   }
 
@@ -65,7 +63,7 @@ export class TelegramBot {
 
   async sendNotification(content: string): Promise<void> {
     try {
-      await this.bot.telegram.sendMessage(this.config.chatId, content);
+      await this.bot.api.sendMessage(this.config.chatId, content);
     } catch (err) {
       this.logger.error({ error: err }, "Failed to send Telegram notification");
     }
@@ -84,7 +82,7 @@ export class TelegramBot {
   }
 
   private setupHandlers(): void {
-    this.bot.on(message("text"), async (ctx) => {
+    this.bot.on("message:text", async (ctx) => {
       if (!this.isAllowed(ctx)) return;
 
       const userId = String(ctx.from.id);
@@ -93,7 +91,7 @@ export class TelegramBot {
       await this.handleIncoming(ctx, userId, text, undefined);
     });
 
-    this.bot.on(message("document"), async (ctx) => {
+    this.bot.on("message:document", async (ctx) => {
       if (!this.isAllowed(ctx)) return;
 
       const userId = String(ctx.from.id);
@@ -110,7 +108,7 @@ export class TelegramBot {
       ]);
     });
 
-    this.bot.on(message("photo"), async (ctx) => {
+    this.bot.on("message:photo", async (ctx) => {
       if (!this.isAllowed(ctx)) return;
 
       const userId = String(ctx.from.id);
@@ -138,7 +136,7 @@ export class TelegramBot {
   ): Promise<void> {
     this.logger.debug({ userId, hasFiles: !!fileInfos }, "Processing Telegram message");
 
-    await ctx.sendChatAction("typing");
+    await ctx.replyWithChatAction("typing");
 
     let tempDir: string | undefined;
     let orchestratorResponse: OrchestratorResponse | undefined;
@@ -163,8 +161,9 @@ export class TelegramBot {
           }
 
           try {
-            const fileUrl = await ctx.telegram.getFileLink(fileInfo.fileId);
-            const response = await fetch(fileUrl.href);
+            const fileObj = await ctx.api.getFile(fileInfo.fileId);
+            const fileUrl = `https://api.telegram.org/file/bot${this.config.botToken}/${fileObj.file_path}`;
+            const response = await fetch(fileUrl);
 
             if (!response.ok) {
               this.logger.warn(
@@ -216,7 +215,7 @@ export class TelegramBot {
       if (orchestratorResponse.files && orchestratorResponse.files.length > 0) {
         for (const file of orchestratorResponse.files) {
           try {
-            await ctx.replyWithDocument(Input.fromLocalFile(file.path, file.name));
+            await ctx.replyWithDocument(new InputFile(file.path, file.name));
             this.logger.debug({ fileName: file.name }, "Sent Telegram response file");
           } catch (err) {
             this.logger.error({ fileName: file.name, error: err }, "Failed to send Telegram file");

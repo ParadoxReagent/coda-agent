@@ -17,11 +17,12 @@ describe("AgentSkillsSkill", () => {
     expect(skill.getRequiredConfig()).toEqual([]);
   });
 
-  it("registers 2 tools", () => {
+  it("registers 3 tools", () => {
     const tools = skill.getTools();
-    expect(tools).toHaveLength(2);
+    expect(tools).toHaveLength(3);
     expect(tools.map((t) => t.name)).toEqual([
       "skill_activate",
+      "skill_rescan",
       "skill_read_resource",
     ]);
   });

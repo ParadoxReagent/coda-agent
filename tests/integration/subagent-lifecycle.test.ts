@@ -47,6 +47,12 @@ function createTestProviderManager(provider?: ReturnType<typeof createMockProvid
       model: "mock-model",
       failedOver: false,
     })),
+    getForUserTiered: vi.fn(async () => ({
+      provider: p,
+      model: "mock-model",
+      failedOver: false,
+    })),
+    isTierEnabled: vi.fn(() => false),
     trackUsage: vi.fn(async () => {}),
   };
 }
