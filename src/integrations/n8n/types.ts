@@ -41,4 +41,5 @@ export interface N8nWebhookConfig {
   auth?: N8nWebhookAuth;
   timeout_ms: number;
   description?: string;
+  requires_confirmation?: boolean;
 }

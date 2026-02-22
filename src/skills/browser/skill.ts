@@ -27,27 +27,25 @@ const INTERNAL_HOSTNAME_REGEX =
   /^(localhost|.*\.local|.*\.internal|.*\.lan|redis|postgres|db|coda[-_].*)$/i;
 
 /**
- * BrowserSkill — secure browser automation via Playwright MCP in ephemeral Docker containers.
+ * BrowserSkill — secure browser automation via Playwright in ephemeral Docker containers.
  *
  * Each browser_open call spawns a new isolated container on the `coda-browser-sandbox`
  * network (internet-only, no access to coda-internal services). All containers are
  * automatically destroyed when sessions are closed or when they idle past the timeout.
  *
  * Permission tiers:
- *   browser_close        tier 0  (read-only / cleanup)
+ *   browser_close        tier 0  (cleanup)
  *   browser_screenshot   tier 1  (writes temp file, non-destructive)
- *   browser_get_content  tier 1
+ *   browser_get_content  tier 1  (read-only)
  *   browser_open         tier 2
  *   browser_navigate     tier 2  + requiresCritique
- *   browser_click        tier 2
- *   browser_type         tier 2  + sensitive (may contain credentials)
- *   browser_evaluate     tier 3  (confirmation required — arbitrary JS execution)
+ *   browser_interact     tier 2  + sensitive (may contain credentials when action=type)
  */
 export class BrowserSkill implements Skill {
   readonly name = "browser";
   readonly description =
     "Secure browser automation via Playwright in ephemeral Docker containers. " +
-    "Supports navigation, form filling, screenshots, and page content extraction. " +
+    "Supports navigation, form interaction, screenshots, and page content extraction. " +
     "Containers are network-isolated from internal services and destroyed after use.";
   readonly kind = "integration" as const;
 
@@ -71,10 +69,18 @@ export class BrowserSkill implements Skill {
         description:
           "Open a new isolated browser session in a sandboxed Docker container. " +
           "Returns a session_id required for all subsequent browser tools. " +
+          "Optionally navigate to a starting URL in the same call. " +
           "Always call browser_close when done to release container resources.",
         input_schema: {
           type: "object",
-          properties: {},
+          properties: {
+            url: {
+              type: "string",
+              description:
+                "Optional URL to navigate to immediately after opening the session. " +
+                "Must be http or https. If omitted, session opens at a blank page.",
+            },
+          },
           required: [],
         },
         permissionTier: 2,
@@ -82,7 +88,7 @@ export class BrowserSkill implements Skill {
       {
         name: "browser_navigate",
         description:
-          "Navigate the browser to a URL. Only http/https URLs to public internet are allowed — " +
+          "Navigate the browser to a URL. Only http/https URLs to the public internet are allowed — " +
           "private IPs, loopback addresses, and internal hostnames are blocked.",
         input_schema: {
           type: "object",
@@ -100,6 +106,65 @@ export class BrowserSkill implements Skill {
         },
         permissionTier: 2,
         requiresCritique: true,
+      },
+      {
+        name: "browser_get_content",
+        description:
+          "Get an accessibility snapshot of the current page — a structured text representation " +
+          "of all interactive elements with Playwright locator strings. " +
+          "Use the locators in the '→' column as the selector for browser_interact.",
+        input_schema: {
+          type: "object",
+          properties: {
+            session_id: {
+              type: "string",
+              description: "Browser session ID",
+            },
+          },
+          required: ["session_id"],
+        },
+        permissionTier: 1,
+      },
+      {
+        name: "browser_interact",
+        description:
+          "Interact with an element on the page: click a button or link, type text into a field, " +
+          "or select a dropdown option. Use browser_get_content first to get selectors. " +
+          "Marked sensitive because type action may contain credentials.",
+        input_schema: {
+          type: "object",
+          properties: {
+            session_id: {
+              type: "string",
+              description: "Browser session ID",
+            },
+            action: {
+              type: "string",
+              enum: ["click", "type", "select"],
+              description:
+                "Action to perform: " +
+                "'click' — click the element; " +
+                "'type' — fill a text input (clears existing value first); " +
+                "'select' — choose an option from a <select> dropdown",
+            },
+            selector: {
+              type: "string",
+              description:
+                "Playwright selector for the element, e.g. from browser_get_content. " +
+                "Examples: 'button:has-text(\"Sign In\")', 'input[placeholder=\"Email\"]', " +
+                "'a:has-text(\"About Us\")', 'select[aria-label=\"Country\"]'",
+            },
+            value: {
+              type: "string",
+              description:
+                "Text to type (action=type) or option value to select (action=select). " +
+                "Not used for action=click.",
+            },
+          },
+          required: ["session_id", "action", "selector"],
+        },
+        permissionTier: 2,
+        sensitive: true,
       },
       {
         name: "browser_screenshot",
@@ -120,101 +185,6 @@ export class BrowserSkill implements Skill {
           required: ["session_id"],
         },
         permissionTier: 1,
-      },
-      {
-        name: "browser_get_content",
-        description:
-          "Get an accessibility snapshot of the current page — a structured text representation " +
-          "of all interactive elements with their ref IDs. Use this to see page content and " +
-          "identify element refs needed for browser_click and browser_type.",
-        input_schema: {
-          type: "object",
-          properties: {
-            session_id: {
-              type: "string",
-              description: "Browser session ID",
-            },
-          },
-          required: ["session_id"],
-        },
-        permissionTier: 1,
-      },
-      {
-        name: "browser_click",
-        description:
-          "Click an element on the page. First call browser_get_content to obtain the " +
-          "accessibility snapshot with element refs (e.g. ref='e12'). " +
-          "Provide the element description and ref from the snapshot.",
-        input_schema: {
-          type: "object",
-          properties: {
-            session_id: {
-              type: "string",
-              description: "Browser session ID",
-            },
-            element: {
-              type: "string",
-              description: "Human-readable description of the element (from accessibility snapshot)",
-            },
-            ref: {
-              type: "string",
-              description: "Element ref ID from browser_get_content snapshot (e.g. 'e12')",
-            },
-          },
-          required: ["session_id", "element", "ref"],
-        },
-        permissionTier: 2,
-      },
-      {
-        name: "browser_type",
-        description:
-          "Type text into a form field. First call browser_get_content to identify the input's ref. " +
-          "May contain credentials — logged as sensitive.",
-        input_schema: {
-          type: "object",
-          properties: {
-            session_id: {
-              type: "string",
-              description: "Browser session ID",
-            },
-            element: {
-              type: "string",
-              description: "Human-readable description of the input field",
-            },
-            ref: {
-              type: "string",
-              description: "Element ref ID from browser_get_content snapshot",
-            },
-            text: {
-              type: "string",
-              description: "Text to type into the field",
-            },
-          },
-          required: ["session_id", "element", "ref", "text"],
-        },
-        permissionTier: 2,
-        sensitive: true,
-      },
-      {
-        name: "browser_evaluate",
-        description:
-          "Execute JavaScript in the browser page context. Use only when other browser tools " +
-          "are insufficient. Requires user confirmation.",
-        input_schema: {
-          type: "object",
-          properties: {
-            session_id: {
-              type: "string",
-              description: "Browser session ID",
-            },
-            script: {
-              type: "string",
-              description: "JavaScript expression to evaluate in the browser context",
-            },
-          },
-          required: ["session_id", "script"],
-        },
-        permissionTier: 3,
       },
       {
         name: "browser_close",
@@ -238,14 +208,12 @@ export class BrowserSkill implements Skill {
 
   async execute(toolName: string, input: Record<string, unknown>): Promise<string> {
     switch (toolName) {
-      case "browser_open":      return this.openSession();
-      case "browser_navigate":  return this.navigate(input);
-      case "browser_screenshot": return this.screenshot(input);
+      case "browser_open":        return this.openSession(input);
+      case "browser_navigate":   return this.navigate(input);
       case "browser_get_content": return this.getContent(input);
-      case "browser_click":     return this.click(input);
-      case "browser_type":      return this.type(input);
-      case "browser_evaluate":  return this.evaluate(input);
-      case "browser_close":     return this.closeSession(input);
+      case "browser_interact":   return this.interact(input);
+      case "browser_screenshot": return this.screenshot(input);
+      case "browser_close":      return this.closeSession(input);
       default:
         return JSON.stringify({ success: false, error: `Unknown tool: ${toolName}` });
     }
@@ -261,6 +229,7 @@ export class BrowserSkill implements Skill {
     this.service.start();
     this.logger.info(
       {
+        mode: this.config.mode,
         image: this.config.image,
         network: this.config.sandbox_network,
         maxSessions: this.config.max_sessions,
@@ -275,18 +244,37 @@ export class BrowserSkill implements Skill {
     this.logger?.info("Browser automation skill stopped");
   }
 
-  // ─── Tool implementations ─────────────────────────────────────────────────
+  // ─── Tool implementations ────────────────────────────────────────────────────
 
-  private async openSession(): Promise<string> {
+  private async openSession(input: Record<string, unknown>): Promise<string> {
+    const url = input.url as string | undefined;
+
+    // Validate URL before creating the session if provided
+    if (url) {
+      const blocked = this.validateUrl(url);
+      if (blocked) {
+        this.logger.warn({ url, reason: blocked }, "browser_open navigate blocked");
+        return JSON.stringify({ success: false, error: blocked });
+      }
+    }
+
     try {
       const result = await this.service.createSession();
+
+      let message =
+        `Browser session started (id: ${result.sessionId}). ` +
+        `Use this session_id for subsequent browser tools. ` +
+        `Call browser_close when done.`;
+
+      if (url) {
+        await this.service.navigate(result.sessionId, url);
+        message += ` Navigated to: ${url}`;
+      }
+
       return JSON.stringify({
         success: true,
         session_id: result.sessionId,
-        message:
-          `Browser session started (id: ${result.sessionId}). ` +
-          `Use this session_id for subsequent browser tools. ` +
-          `Call browser_close when done.`,
+        message,
       });
     } catch (err) {
       this.logger.error({ error: err }, "browser_open failed");
@@ -308,45 +296,10 @@ export class BrowserSkill implements Skill {
     }
 
     try {
-      const result = await this.service.callTool(sessionId, "browser_navigate", { url });
-      return JSON.stringify({ success: !result.isError, result: result.content });
-    } catch (err) {
+      await this.service.navigate(sessionId, url);
       return JSON.stringify({
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private async screenshot(input: Record<string, unknown>): Promise<string> {
-    const sessionId = input.session_id as string;
-    const fullPage = (input.full_page as boolean) ?? false;
-
-    try {
-      const raw = await this.service.callToolRaw(sessionId, "browser_take_screenshot", { type: "png", fullPage });
-
-      // Extract image block if present and save to a temp file
-      for (const block of raw.content) {
-        if (block.type === "image" && typeof block.data === "string") {
-          const mimeType = typeof block.mimeType === "string" ? block.mimeType : "image/png";
-          const filePath = await this.service.saveScreenshot(sessionId, block.data, mimeType);
-          return JSON.stringify({
-            success: true,
-            file_path: filePath,
-            message: `Screenshot saved to ${filePath}`,
-          });
-        }
-      }
-
-      // Fallback: return serialized text content
-      const text = raw.content
-        .filter((b) => b.type === "text")
-        .map((b) => b.text as string)
-        .join("\n");
-
-      return JSON.stringify({
-        success: !raw.isError,
-        result: text || "Screenshot taken (no image data returned)",
+        success: true,
+        result: `Navigated to ${url}. Use browser_get_content to inspect the page.`,
       });
     } catch (err) {
       return JSON.stringify({
@@ -360,8 +313,8 @@ export class BrowserSkill implements Skill {
     const sessionId = input.session_id as string;
 
     try {
-      const result = await this.service.callTool(sessionId, "browser_snapshot", {});
-      return JSON.stringify({ success: !result.isError, content: result.content });
+      const content = await this.service.getContent(sessionId);
+      return JSON.stringify({ success: true, content });
     } catch (err) {
       return JSON.stringify({
         success: false,
@@ -370,14 +323,53 @@ export class BrowserSkill implements Skill {
     }
   }
 
-  private async click(input: Record<string, unknown>): Promise<string> {
+  private async interact(input: Record<string, unknown>): Promise<string> {
     const sessionId = input.session_id as string;
-    const element = input.element as string;
-    const ref = input.ref as string;
+    const action = input.action as "click" | "type" | "select";
+    const selector = input.selector as string;
+    const value = input.value as string | undefined;
 
     try {
-      const result = await this.service.callTool(sessionId, "browser_click", { element, ref });
-      return JSON.stringify({ success: !result.isError, result: result.content });
+      switch (action) {
+        case "click":
+          await this.service.click(sessionId, selector);
+          return JSON.stringify({
+            success: true,
+            result: `Clicked element: ${selector}`,
+          });
+
+        case "type":
+          if (value === undefined) {
+            return JSON.stringify({
+              success: false,
+              error: "browser_interact with action=type requires a value",
+            });
+          }
+          await this.service.fill(sessionId, selector, value);
+          return JSON.stringify({
+            success: true,
+            result: `Typed into: ${selector}`,
+          });
+
+        case "select":
+          if (value === undefined) {
+            return JSON.stringify({
+              success: false,
+              error: "browser_interact with action=select requires a value",
+            });
+          }
+          await this.service.select(sessionId, selector, value);
+          return JSON.stringify({
+            success: true,
+            result: `Selected option "${value}" in: ${selector}`,
+          });
+
+        default:
+          return JSON.stringify({
+            success: false,
+            error: `Unknown action: ${action}. Must be one of: click, type, select`,
+          });
+      }
     } catch (err) {
       return JSON.stringify({
         success: false,
@@ -386,37 +378,17 @@ export class BrowserSkill implements Skill {
     }
   }
 
-  private async type(input: Record<string, unknown>): Promise<string> {
+  private async screenshot(input: Record<string, unknown>): Promise<string> {
     const sessionId = input.session_id as string;
-    const element = input.element as string;
-    const ref = input.ref as string;
-    const text = input.text as string;
+    const fullPage = (input.full_page as boolean) ?? false;
 
     try {
-      // browser_fill clears + types; browser_type just types
-      const result = await this.service.callTool(sessionId, "browser_type", {
-        element,
-        ref,
-        text,
-      });
-      return JSON.stringify({ success: !result.isError, result: result.content });
-    } catch (err) {
+      const filePath = await this.service.screenshot(sessionId, fullPage);
       return JSON.stringify({
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
+        success: true,
+        file_path: filePath,
+        message: `Screenshot saved to ${filePath}`,
       });
-    }
-  }
-
-  private async evaluate(input: Record<string, unknown>): Promise<string> {
-    const sessionId = input.session_id as string;
-    const script = input.script as string;
-
-    try {
-      const result = await this.service.callTool(sessionId, "browser_evaluate", {
-        function: `() => { ${script} }`,
-      });
-      return JSON.stringify({ success: !result.isError, result: result.content });
     } catch (err) {
       return JSON.stringify({
         success: false,
@@ -442,7 +414,7 @@ export class BrowserSkill implements Skill {
     }
   }
 
-  // ─── URL validation (SSRF protection) ────────────────────────────────────
+  // ─── URL validation (SSRF protection) ────────────────────────────────────────
 
   /**
    * Validate a URL against SSRF protection rules and the configurable blocklist/allowlist.
@@ -464,7 +436,8 @@ export class BrowserSkill implements Skill {
       );
     }
 
-    const hostname = urlObj.hostname.toLowerCase();
+    // Strip IPv6 brackets so regexes can match bare addresses: [::1] → ::1
+    const hostname = urlObj.hostname.toLowerCase().replace(/^\[(.+)\]$/, "$1");
 
     // Block private IP ranges (SSRF protection)
     for (const range of PRIVATE_IP_RANGES) {

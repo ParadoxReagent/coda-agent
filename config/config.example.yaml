@@ -92,16 +92,51 @@ weather: {}         # Free NWS API, no key needed
 
 # browser:
 #   enabled: false  # or BROWSER_ENABLED=true
-#   # Build image first: docker compose --profile browser-build build
-#   image: "coda-browser-sandbox"          # or BROWSER_IMAGE
-#   sandbox_network: "coda-browser-sandbox" # Internet-only network (isolated from coda-internal)
+#   #
+#   # Connection mode:
+#   #   docker — spawn an isolated Docker container per session (default, production)
+#   #            Build image first: docker compose --profile mcp-build build
+#   #   host   — launch Chromium directly on the host (development/testing only)
+#   #            Requires: npx playwright install chromium
+#   mode: "docker"                          # "docker" or "host"
+#   image: "coda-browser-sandbox"          # or BROWSER_IMAGE (docker mode only)
+#   sandbox_network: "coda-browser-sandbox" # Internet-only network (docker mode only)
 #   max_sessions: 3                         # Max concurrent browser sessions
-#   session_timeout_seconds: 300            # Auto-destroy sessions idle > this
-#   tool_timeout_ms: 30000                  # MCP tool call timeout
+#   session_timeout_seconds: 300            # Auto-destroy sessions idle > this (seconds)
+#   tool_timeout_ms: 30000                  # Per-operation timeout (navigate, click, etc.)
+#   connect_timeout_ms: 15000              # WebSocket connection timeout per attempt (docker mode)
+#   connect_retries: 3                     # Retry attempts when connecting to container (docker mode)
+#   headless: true                         # Run headless (host mode only; docker is always headless)
 #   # URL allowlist — if non-empty, only these domains are reachable
 #   url_allowlist: []
 #   # Additional URL blocklist (private IPs/localhost are always blocked)
 #   url_blocklist: []
+
+# n8n:
+#   webhooks:
+#     # Auto-approved webhook — called without confirmation prompt (read-only operations)
+#     web_research:
+#       url: "https://n8n.example.com/webhook/your-webhook-id"
+#       timeout_ms: 30000
+#       description: "Web research — searches the web and returns summarized results"
+#       requires_confirmation: false   # ← enables n8n_call_webhook (no prompt)
+#     #
+#     # Confirmation-required webhook (default when field is omitted)
+#     send_email:
+#       url: "https://n8n.example.com/webhook/another-webhook-id"
+#       timeout_ms: 10000
+#       description: "Send an email via n8n"
+#       # requires_confirmation: true  ← default; use n8n_trigger_webhook
+#     #
+#     # Webhook with authentication
+#     private_workflow:
+#       url: "https://n8n.example.com/webhook/private-id"
+#       timeout_ms: 15000
+#       description: "Internal workflow requiring API key"
+#       auth:
+#         type: header
+#         name: "X-Api-Key"
+#         value: "your-secret-key"  # or use ${ENV_VAR} substitution
 
 # slack:
 #   app_token: ""  # or SLACK_APP_TOKEN

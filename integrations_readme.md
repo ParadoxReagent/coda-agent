@@ -173,9 +173,9 @@ Activate the `web-research` agent skill via `skill_activate` for guided research
 
 ## Browser Sandbox
 
-Playwright-based browser automation in ephemeral, network-isolated Docker containers. Use this for interactive web tasks that Firecrawl's read-only scraping cannot handle: logging into portals, filling forms, navigating SPAs, taking screenshots.
+Playwright-based browser automation using Playwright's direct Node.js API with ephemeral, network-isolated Docker containers. Use this for interactive web tasks that Firecrawl's read-only scraping cannot handle: logging into portals, filling forms, navigating SPAs, taking screenshots.
 
-**Architecture:**
+**Architecture (docker mode — production):**
 
 ```
 coda-core (coda-internal network)
@@ -184,21 +184,33 @@ coda-core (coda-internal network)
     │
     └── BrowserService.createSession()
          │
-         └── docker run -i --rm --network coda-browser-sandbox ...
+         └── docker run -d --rm --network coda-browser-sandbox ...
               │
-              └── Playwright MCP server (stdio) ← McpClientWrapper
+              └── playwright-server.js (WebSocket on :3000/playwright)
                    │
                    └── Chromium (headless, ephemeral)
                         │
                         └── Internet only (no coda-internal access)
+         │
+         └── chromium.connect(ws://container-ip:3000/playwright)
+              │
+              └── Direct Playwright Node.js API (no MCP protocol layer)
 ```
 
-Browser containers communicate with coda via MCP over stdio (`docker run -i`). Each session is one container. Sessions are destroyed when `browser_close` is called or when they idle past `session_timeout_seconds`.
+**Architecture (host mode — development):**
 
-**Build the image:**
+```
+coda-core
+    │
+    └── chromium.launch() — Chromium runs directly on the host
+```
+
+The direct Playwright API eliminates the MCP stdio protocol layer, which was prone to `McpError(ConnectionClosed)` failures when Docker exited before completing the MCP handshake. Tool call timeouts are now native Playwright timeouts (always respected), not broken AbortController wrappers.
+
+**Build the image (docker mode):**
 
 ```bash
-docker compose --profile browser-build build
+docker compose --profile mcp-build build
 # or: docker build -t coda-browser-sandbox src/skills/browser/
 ```
 
@@ -208,31 +220,44 @@ docker compose --profile browser-build build
 docker network create coda-browser-sandbox
 ```
 
-**Enable in config:**
+**Enable in config (docker mode):**
 
 ```yaml
 browser:
   enabled: true
+  mode: "docker"
   image: "coda-browser-sandbox"
   sandbox_network: "coda-browser-sandbox"
   max_sessions: 3                   # Max concurrent sessions
   session_timeout_seconds: 300      # 5-minute idle timeout
   tool_timeout_ms: 30000
+  connect_timeout_ms: 15000         # WS connection timeout per attempt
+  connect_retries: 3                # Retry attempts per session creation
   url_allowlist: []                 # Optional: restrict to specific domains
   url_blocklist: []                 # Additional blocked domains
 ```
 
-**Container security flags applied at runtime:**
+**Enable in config (host mode — development):**
+
+```yaml
+browser:
+  enabled: true
+  mode: "host"
+  headless: true   # false to see the browser window
+```
+Also run once: `npx playwright install chromium`
+
+**Container security flags applied at runtime (docker mode):**
 
 ```
---cap-drop=ALL                          No Linux capabilities
---security-opt=no-new-privileges        No privilege escalation
---read-only                             Read-only root filesystem
---tmpfs /tmp:rw,noexec,nosuid,size=256m Writable temp storage
---tmpfs /home/browser:rw,noexec,nosuid,size=128m  Browser profile
---shm-size 256m                         Chromium shared memory
---memory 1g --cpus 1 --pids-limit 512  Resource limits
---network coda-browser-sandbox          Internet-only (no internal access)
+--cap-drop=ALL                           No Linux capabilities
+--security-opt=no-new-privileges         No privilege escalation
+--read-only                              Read-only root filesystem
+--tmpfs /tmp:rw,nosuid,size=256m         Writable temp storage
+--tmpfs /home/pwuser:rw,nosuid,size=128m Browser profile
+--shm-size 256m                          Chromium shared memory
+--memory 1g --cpus 1 --pids-limit 512   Resource limits
+--network coda-browser-sandbox           Internet-only (no internal access)
 ```
 
 **Skill documentation:** See [skills_readme.md](skills_readme.md#browser-automation) for tool reference, permission tiers, and the SSRF protection model.

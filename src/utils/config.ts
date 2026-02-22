@@ -247,6 +247,13 @@ const ExecutionConfigSchema = z.object({
 const BrowserConfigSchema = z.object({
   /** Enable/disable the browser automation skill. */
   enabled: z.boolean().default(false),
+  /**
+   * Connection mode:
+   * - "docker" (default): spawn an isolated container per session (production)
+   * - "host": launch Chromium directly on the host machine (development/testing)
+   *           Requires: npx playwright install chromium
+   */
+  mode: z.enum(["docker", "host"]).default("docker"),
   /** Docker socket path (leave default unless using a remote Docker host). */
   docker_socket: z.string().default("/var/run/docker.sock"),
   /** Docker image for the browser sandbox container. */
@@ -257,8 +264,14 @@ const BrowserConfigSchema = z.object({
   max_sessions: z.number().default(3),
   /** Idle session timeout in seconds — sessions inactive longer than this are auto-destroyed. */
   session_timeout_seconds: z.number().default(300),
-  /** MCP tool call timeout in milliseconds. */
+  /** Tool call timeout in milliseconds. */
   tool_timeout_ms: z.number().default(30000),
+  /** WebSocket connection timeout in milliseconds (docker mode: time to connect to container). */
+  connect_timeout_ms: z.number().default(15000),
+  /** Number of connection retry attempts in docker mode before giving up. */
+  connect_retries: z.number().default(3),
+  /** Run browser in headless mode. Only applies in host mode (docker mode always headless). */
+  headless: z.boolean().default(true),
   /**
    * Optional URL allowlist. If non-empty, browser_navigate is restricted to these domains.
    * Subdomains are automatically included (e.g. "example.com" allows "www.example.com").

@@ -5,6 +5,8 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
+# Skip Playwright browser downloads — browsers live in the browser-sandbox image, not here.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json ./
@@ -16,15 +18,14 @@ FROM node:22-alpine
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-# Install Docker CLI and su-exec for socket permission handling
-RUN apk add --no-cache docker-cli su-exec
-
-# Install Python 3 and pip for MCP PDF server
-RUN apk add --no-cache python3 py3-pip
+# Install system dependencies
+RUN apk add --no-cache docker-cli su-exec python3 py3-pip
 
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
+# Skip Playwright browser downloads — browsers live in the browser-sandbox image, not here.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/dist ./dist
@@ -34,6 +35,7 @@ COPY src/skills/agent-skills/ ./dist/skills/agent-skills/
 # Copy MCP server files and install Python dependencies
 COPY src/integrations/mcp/servers/ ./src/integrations/mcp/servers/
 RUN pip3 install --no-cache-dir --break-system-packages \
+  --timeout 120 --retries 5 \
   -r src/integrations/mcp/servers/pdf/requirements.txt
 
 ENV NODE_ENV=production
