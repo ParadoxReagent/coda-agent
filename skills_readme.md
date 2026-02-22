@@ -79,6 +79,99 @@ scheduler:
       enabled: true
 ```
 
+### Audit
+
+Read-only agent self-introspection into the persistent audit log. Allows the agent to query its own tool call history, identify failure patterns, and surface usage statistics without direct DB access.
+
+| Tool | Description |
+|------|-------------|
+| `audit_query` | Query recent tool calls filtered by tool, skill, status, or time window |
+| `audit_stats` | Aggregate statistics: total calls, success rate, top tools, errors by tool |
+
+Both tools are `mainAgentOnly` — not available to subagents.
+
+> **Data foundation**: The audit log records every tool call to `audit_log` in Postgres. This data powers Phase 4's weekly Opus reflection cycle and self-improvement engine.
+
+### Tasks (Long-Horizon Execution)
+
+Persistent multi-day task tracking with checkpointing and auto-resumption. Tasks survive restarts and can span multiple days with scheduled action points.
+
+| Tool | Description |
+|------|-------------|
+| `task_create` | Create a persistent task with an ordered list of steps and optional schedule |
+| `task_status` | Get status of a specific task, or list all active tasks for the current user |
+| `task_advance` | Mark the current step complete and advance to the next step |
+| `task_block` | Mark a task as blocked, recording the blocker reason and type |
+
+**Scheduled resumption**: A cron job (default: every 15 minutes) checks for tasks whose `next_action_at` has arrived and notifies the user via the configured messaging channel.
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+tasks:
+  enabled: true
+  resume_cron: "*/15 * * * *"   # How often to check for resumable tasks
+  max_active_per_user: 5         # Max concurrent active tasks per user
+  max_auto_resume_attempts: 3    # Max times a task auto-resumes without user input
+```
+
+### Self-Improvement
+
+Weekly Opus-powered reflection cycle that analyzes performance data and generates structured improvement proposals. Supports version-controlled prompt evolution with A/B testing.
+
+All tools are `mainAgentOnly` and require user confirmation for write operations.
+
+| Tool | Description |
+|------|-------------|
+| `improvement_proposals_list` | List improvement proposals (filter by status: pending/approved/rejected/applied/all) |
+| `improvement_proposal_decide` | Approve or reject a proposal (tier 3, requires confirmation) |
+| `improvement_trigger_reflection` | Manually trigger a reflection cycle immediately (tier 3, requires confirmation) |
+| `prompt_rollback` | Roll back a prompt section to its previous version (tier 3, requires confirmation) |
+| `gap_detection_trigger` | Manually trigger a monthly capability gap detection cycle (tier 3, requires confirmation) |
+| `few_shot_harvest_trigger` | Manually trigger a few-shot pattern harvest from high-scoring interactions (tier 3, requires confirmation) |
+
+**How it works:**
+1. Every Sunday at 3 AM (configurable), an Opus reflection cycle runs
+2. It analyzes: audit stats, low-scoring self-assessments, routing patterns, current system prompt, and tool list
+3. Opus generates up to 10 structured proposals with category, title, description, priority, and optional prompt diff
+4. Proposals are inserted to `improvement_proposals` with `status: pending`
+5. A summary is sent to the configured approval channel
+6. The user reviews via `improvement_proposals_list` and decides via `improvement_proposal_decide`
+7. Approved `prompt` proposals with a diff are automatically applied to `prompt_versions` when `prompt_evolution_enabled: true`
+
+**Self-assessment** (4.1): After each tool-using turn, Haiku scores the interaction 1-5 and records failure modes to `self_assessments`. This data feeds the weekly reflection cycle.
+
+**Learned routing** (4.4): A separate cron (default Sunday 4 AM) retrains the `LearnedTierClassifier` from routing decisions + self-assessment scores, improving tier classification over time.
+
+**Gap detection** (5.4): Monthly Opus analysis of 30 days of audit data to identify missing capabilities (tools/integrations that would prevent recurring failures). Runs on the 1st of each month at 2 AM. Generates `capability_gap` proposals in `improvement_proposals`.
+
+**Few-shot harvest** (5.7): Monthly Opus job harvesting high-scoring interactions (score ≥ 4, tool calls ≥ 2) into `solution_patterns`. At turn start, 2-3 relevant patterns are retrieved by keyword similarity and injected into the system prompt as `<example>` blocks.
+
+**Critique loop** (5.3): Before executing any tool at tier ≥ 3 (or tools marked `requiresCritique: true`), a Haiku-powered safety reviewer checks the action for alignment, injection risk, and proportionality. Blocked actions are logged to audit with `event_type: "critique"`.
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+self_improvement:
+  enabled: true
+  opus_model: "claude-opus-4-6"          # Optional: override Opus model
+  reflection_cron: "0 3 * * 0"          # Sunday 3 AM
+  assessment_enabled: true               # Post-turn self-scoring
+  prompt_evolution_enabled: false        # Auto-apply approved prompt proposals
+  max_reflection_input_tokens: 8000      # Max tokens sent to Opus
+  approval_channel: "discord"            # Where to send proposal summaries
+  routing_retrain_cron: "0 4 * * 0"     # Sunday 4 AM
+  # Phase 5 additions:
+  critique_enabled: true                 # Pre-execution Haiku safety review
+  critique_min_tier: 3                   # Minimum tier to trigger critique
+  gap_detection_enabled: true            # Monthly capability gap analysis
+  gap_detection_cron: "0 2 1 * *"        # 1st of month 2 AM
+  few_shot_enabled: true                 # Harvest + inject solution patterns
+  few_shot_harvest_cron: "0 4 1 * *"    # 1st of month 4 AM
+  few_shot_min_score: 4                  # Min score for harvest (0-5)
+  few_shot_min_tool_calls: 2             # Min tool calls for harvest
+```
+
 ### Docker Executor
 
 Provides sandboxed code execution in ephemeral Docker containers. Enables agent skills (like PDF processing) to run code safely with strict resource limits and isolation.
@@ -140,6 +233,256 @@ When the LLM activates the skill via `skill_activate`, it receives the `docker_i
 **Output files:**
 
 The container has access to files in the mounted working directory at `/workspace`. Commands can write output files to `/workspace/output/` — these files are automatically collected and returned to the user as attachments.
+
+### Browser Automation
+
+Secure browser automation via Playwright running in ephemeral Docker containers. Unlike Firecrawl (read-only scraping), the browser skill can log into portals, fill forms, click buttons, and interact with single-page apps. Containers are network-isolated from coda's internal services and destroyed immediately when sessions end.
+
+| Tool | Tier | Description |
+|------|------|-------------|
+| `browser_open` | 2 | Start a new isolated browser session; returns a `session_id` |
+| `browser_navigate` | 2 | Navigate to a URL (SSRF-protected; critique enabled) |
+| `browser_get_content` | 1 | Accessibility snapshot of the page (element refs for click/type) |
+| `browser_screenshot` | 1 | Take a screenshot; saves to temp file and returns path |
+| `browser_click` | 2 | Click an element by ref from snapshot |
+| `browser_type` | 2 | Type text into a form field by ref (sensitive — may contain credentials) |
+| `browser_evaluate` | 3 | Execute JavaScript in page context (requires confirmation) |
+| `browser_close` | 0 | Destroy the session and container |
+
+**Typical workflow:**
+
+```
+browser_open → browser_navigate(url) → browser_get_content
+  → browser_click(ref from snapshot) → browser_type(ref, text)
+  → browser_screenshot → browser_close
+```
+
+**Security model (defense in depth):**
+
+| Layer | Mechanism |
+|-------|-----------|
+| Network | `coda-browser-sandbox` Docker network — internet only, no `coda-internal` access |
+| SSRF | Hardcoded private IP blocklist (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x, localhost) + configurable blocklist |
+| Container | `--cap-drop=ALL`, `--security-opt=no-new-privileges`, `--read-only`, tmpfs for writable dirs |
+| Resources | Memory 1g, CPU 1, PID 512, SHM 256m |
+| Lifecycle | `--rm` flag + auto-destroy on idle timeout + cleanup in `finally` blocks |
+| Rate limiting | 20 browser tool calls / hour |
+| Audit | All tool calls logged via AuditService |
+
+**Setup:**
+
+1. Build the image: `docker compose --profile browser-build build`
+2. Enable in config:
+
+```yaml
+browser:
+  enabled: true
+  image: "coda-browser-sandbox"
+  sandbox_network: "coda-browser-sandbox"
+  max_sessions: 3
+  session_timeout_seconds: 300
+```
+
+**Environment variable overrides:**
+- `BROWSER_ENABLED=true|false`
+- `BROWSER_IMAGE=coda-browser-sandbox`
+
+**Requirements:**
+- Docker socket mounted (`/var/run/docker.sock`)
+- `coda-browser-sandbox` image built (see above)
+- `coda-browser-sandbox` Docker network created (auto-created by `docker compose up`)
+
+### Specialist Agents
+
+Specialist agents are domain-focused sub-agents defined entirely by files in `src/agents/{name}/`. The main agent delegates tasks to them via `specialist_spawn`, running with a tailored system prompt and a scoped tool allowlist. No TypeScript is needed — adding a new directory is enough.
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `specialist_list` | Show all loaded agents with descriptions and tool lists |
+| `specialist_spawn` | Delegate a task to a named specialist; blocks until the result is returned |
+
+**Built-in agents:**
+
+| Agent | Token budget | Focus |
+|-------|-------------|-------|
+| `home` | 30 000 | Reminders, notes, weather, personal organisation |
+| `research` | 80 000 | Web scraping, search, synthesis, source citation; browser tools available for JS-heavy pages |
+| `lab` | 100 000 | Code execution, debugging, technical research |
+| `planner` | 40 000 | Task decomposition, scheduling, dependency analysis |
+
+The `research` agent has access to both Firecrawl (fast, read-only scraping) and browser tools (`browser_open`, `browser_navigate`, `browser_screenshot`, `browser_get_content`, `browser_click`, `browser_close`) for pages that require JavaScript rendering, click interactions, or pagination. `browser_type` and `browser_evaluate` are excluded — the research agent does not handle credentials or arbitrary JS execution.
+
+---
+
+#### Using agents
+
+Ask the main agent in natural language — it will choose the right specialist automatically:
+
+```
+"Research the latest TypeScript 5.5 release notes and save a summary to notes"
+"Write a Python script that parses a CSV and plots a chart"
+"Create a plan for migrating our database to PostgreSQL 16"
+"Set a reminder for the team meeting every Monday at 9am"
+```
+
+Or use `specialist_list` to discover agents and `specialist_spawn` explicitly:
+
+```
+specialist_spawn: { specialist: "research", task: "Find the top 5 open-source vector databases and compare their indexing strategies" }
+```
+
+---
+
+#### Agent directory format
+
+Each agent lives at `src/agents/{name}/` where `name` matches `/^[a-z][a-z0-9-]*$/`.
+
+```
+src/agents/my-agent/
+  soul.md        # Required — system prompt (plain markdown, no frontmatter)
+  tools.md       # Required — allowed tool names, one per line
+  config.yaml    # Required — description and resource settings
+  references/    # Optional — supplementary docs appended to soul.md
+    guide.md
+    api-reference.json
+```
+
+**`soul.md`** — Plain markdown. The full file body becomes the agent's system prompt. A mandatory security preamble is prepended automatically (injection defense, no exfiltration). Be specific about priorities, output format, and rules.
+
+**`tools.md`** — One tool name per line. Blank lines and lines starting with `#` are ignored. The agent can only call tools listed here — all others are blocked.
+
+```
+# Core research tools
+firecrawl_scrape
+firecrawl_search
+firecrawl_map
+
+# Persistence
+note_save
+note_search
+memory_save
+```
+
+**`config.yaml`** — All fields except `description` are optional:
+
+```yaml
+description: "Web research and synthesis"  # required — shown in specialist_list
+enabled: true                              # set false to skip loading this agent
+default_model: null                        # null = heavy tier model
+default_provider: null                     # null = system default provider
+token_budget: 80000                        # max tokens per run; null = global default
+max_tool_calls: null                       # max tool calls per run; null = global default
+```
+
+**`references/`** — Optional directory of `.md`, `.txt`, or `.json` files. Files are sorted alphabetically and appended to the system prompt as labeled sections:
+
+```
+---
+## Reference: api-reference
+<file contents>
+```
+
+Use references for things that should always be available to the agent (API docs, decision trees, style guides) without cluttering `soul.md`.
+
+---
+
+#### Creating a new agent
+
+1. Create the directory and three required files:
+
+```bash
+mkdir -p src/agents/finance
+
+cat > src/agents/finance/config.yaml << 'EOF'
+description: "Personal finance tracking: expenses, budgets, and summaries"
+enabled: true
+token_budget: 40000
+max_tool_calls: null
+default_model: null
+default_provider: null
+EOF
+
+cat > src/agents/finance/tools.md << 'EOF'
+# Notes for storing expenses and reports
+note_save
+note_search
+note_list
+note_get
+
+# Memory for recurring preferences
+memory_save
+memory_search
+EOF
+
+cat > src/agents/finance/soul.md << 'EOF'
+You are a personal finance specialist. Your focus is tracking expenses, managing budgets, and producing clear financial summaries.
+
+Priorities:
+- Log expenses with amount, category, and date to notes
+- Search notes to retrieve expense history
+- Summarise spending by category when asked
+- Flag unusual or recurring charges
+- Keep responses concrete — include numbers and dates
+
+Always confirm the action taken and the note title used when saving data.
+EOF
+```
+
+2. Restart coda — no other changes needed. The agent loads automatically.
+
+3. Verify: ask the main agent to list specialists, or send `specialist_list`.
+
+**Naming rules:**
+- Must match `/^[a-z][a-z0-9-]*$/` (e.g. `finance`, `dev-ops`, `travel2`)
+- Directories that fail this pattern are skipped with a warning in the logs
+
+**Errors:** if a required file is missing or `config.yaml` is invalid, the agent is skipped and a warning is logged — other agents continue to load normally.
+
+---
+
+#### Overriding an agent via config
+
+All agent settings can be overridden in `config/config.yaml` under `specialists:` without editing the agent directory. Useful for deployment-specific tuning or temporary changes.
+
+```yaml
+specialists:
+  research:
+    # Replace system prompt entirely
+    system_prompt: "You are a focused academic research assistant. Cite all sources in APA format..."
+
+    # Narrow the tool allowlist
+    allowed_tools:
+      - firecrawl_search
+      - note_save
+
+    # Cap resource usage
+    token_budget: 50000
+    max_tool_calls: 20
+
+  lab:
+    # Run lab agent on a more capable model
+    default_model: "claude-opus-4-6"
+    default_provider: "anthropic"
+
+  home:
+    # Disable entirely (won't appear in specialist_list)
+    enabled: false
+```
+
+Override fields (all optional):
+
+| Field | Type | Effect |
+|-------|------|--------|
+| `system_prompt` | string | Replaces `soul.md` entirely |
+| `allowed_tools` | string[] | Replaces `tools.md` list |
+| `blocked_tools` | string[] | Removes specific tools from the allowlist |
+| `default_model` | string | Model ID to use for this agent |
+| `default_provider` | string | Provider name to use for this agent |
+| `token_budget` | number | Max tokens per run |
+| `max_tool_calls` | number | Max tool calls per run |
+| `enabled` | boolean | Set `false` to hide and disable the agent |
 
 ## Agent Skills
 

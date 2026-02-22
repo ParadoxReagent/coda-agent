@@ -21,9 +21,9 @@ describe("SubagentSkill", () => {
   });
 
   describe("getTools()", () => {
-    it("returns all 7 tools", () => {
+    it("returns all 9 tools", () => {
       const tools = skill.getTools();
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(9);
     });
 
     it("marks delegate_to_subagent as mainAgentOnly", () => {

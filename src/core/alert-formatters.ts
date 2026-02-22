@@ -88,6 +88,21 @@ export function formatAlertForSlack(event: CodaEvent): {
   return { blocks };
 }
 
+// ─── Telegram Formatter ────────────────────────────────────────────
+
+export function formatAlertForTelegram(event: CodaEvent): string {
+  const icon = SEVERITY_ICONS[event.severity] ?? "[INFO]";
+  const title = formatEventTitle(event);
+  const description = formatEventDescription(event);
+
+  let text = `*${icon} ${title}*`;
+  if (description) {
+    text += `\n${description}`;
+  }
+  text += `\nSource: ${event.sourceSkill} | ${event.timestamp}`;
+  return text;
+}
+
 // ─── Plain Text Formatter ──────────────────────────────────────────
 
 export function formatAlertPlainText(event: CodaEvent): string {

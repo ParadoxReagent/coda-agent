@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpServerSkill } from "../../../../src/integrations/mcp/skill.js";
 import type { McpServerConfig } from "../../../../src/utils/config.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { McpClientWrapper } from "../../../../src/integrations/mcp/client.js";
+import type { McpServerManager } from "../../../../src/integrations/mcp/manager.js";
 
 describe("McpServerSkill", () => {
-  let mockClient: McpClientWrapper;
+  let mockClient: { callTool: ReturnType<typeof vi.fn> };
+  let mockManager: McpServerManager;
   let config: McpServerConfig;
   let sampleTools: Tool[];
 
@@ -38,32 +39,36 @@ describe("McpServerSkill", () => {
 
     mockClient = {
       callTool: vi.fn(),
-      disconnect: vi.fn(),
-    } as unknown as McpClientWrapper;
+    };
+
+    mockManager = {
+      ensureConnected: vi.fn().mockResolvedValue(sampleTools),
+      getClient: vi.fn().mockReturnValue(mockClient),
+    } as unknown as McpServerManager;
   });
 
   describe("constructor", () => {
     it("creates skill with namespaced name", () => {
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
 
       expect(skill.name).toBe("mcp_filesystem");
     });
 
     it("uses config description if provided", () => {
       config.description = "Custom filesystem integration";
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
 
       expect(skill.description).toBe("Custom filesystem integration");
     });
 
     it("generates default description if not provided", () => {
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
 
       expect(skill.description).toContain("filesystem");
     });
 
     it("marks skill as integration kind", () => {
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
 
       expect(skill.kind).toBe("integration");
     });
@@ -71,7 +76,7 @@ describe("McpServerSkill", () => {
 
   describe("getTools", () => {
     it("returns namespaced tools", () => {
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const tools = skill.getTools();
 
       expect(tools).toHaveLength(1);
@@ -82,12 +87,12 @@ describe("McpServerSkill", () => {
 
   describe("execute", () => {
     it("calls MCP tool with correct arguments", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "File content",
         isError: false,
       });
 
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       await skill.execute("mcp_filesystem_read_file", { path: "/test.txt" });
 
       expect(mockClient.callTool).toHaveBeenCalledWith("read_file", {
@@ -96,12 +101,12 @@ describe("McpServerSkill", () => {
     });
 
     it("returns sanitized success response", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "File content here",
         isError: false,
       });
 
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_filesystem_read_file", { path: "/test.txt" });
 
       const parsed = JSON.parse(result);
@@ -113,12 +118,12 @@ describe("McpServerSkill", () => {
 
     it("truncates oversized responses", async () => {
       const largeContent = "A".repeat(150000);
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: largeContent,
         isError: false,
       });
 
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_filesystem_read_file", { path: "/test.txt" });
 
       const parsed = JSON.parse(result);
@@ -127,12 +132,12 @@ describe("McpServerSkill", () => {
     });
 
     it("handles error responses from MCP tool", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "Error: File not found",
         isError: true,
       });
 
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_filesystem_read_file", { path: "/missing.txt" });
 
       const parsed = JSON.parse(result);
@@ -141,9 +146,9 @@ describe("McpServerSkill", () => {
     });
 
     it("handles exceptions during tool call", async () => {
-      vi.mocked(mockClient.callTool).mockRejectedValue(new Error("Connection timeout"));
+      mockClient.callTool.mockRejectedValue(new Error("Connection timeout"));
 
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_filesystem_read_file", { path: "/test.txt" });
 
       const parsed = JSON.parse(result);
@@ -160,12 +165,12 @@ describe("McpServerSkill", () => {
         ]
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
 
-      const skill = new McpServerSkill("pdf", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("pdf", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_pdf_merge_pdfs", {
         files: ["/tmp/file1.pdf", "/tmp/file2.pdf"],
         output_path: "/tmp/output/merged.pdf"
@@ -190,12 +195,12 @@ describe("McpServerSkill", () => {
         ]
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
 
-      const skill = new McpServerSkill("pdf", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("pdf", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_pdf_split_pdf", {
         file: "/tmp/document.pdf",
         pages: "1-3",
@@ -214,12 +219,12 @@ describe("McpServerSkill", () => {
         text: { "1": "Page 1 content", "2": "Page 2 content" }
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
 
-      const skill = new McpServerSkill("pdf", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("pdf", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_pdf_extract_text", {
         file: "/tmp/document.pdf"
       });
@@ -230,12 +235,12 @@ describe("McpServerSkill", () => {
     });
 
     it("handles non-JSON MCP response gracefully", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "Plain text response without JSON",
         isError: false,
       });
 
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_filesystem_read_file", { path: "/test.txt" });
 
       const parsed = JSON.parse(result);
@@ -251,12 +256,12 @@ describe("McpServerSkill", () => {
         output_files: "not-an-array"  // Invalid format
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
 
-      const skill = new McpServerSkill("pdf", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("pdf", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_pdf_merge_pdfs", {
         files: ["/tmp/file1.pdf"],
         output_path: "/tmp/merged.pdf"
@@ -269,17 +274,15 @@ describe("McpServerSkill", () => {
   });
 
   describe("shutdown", () => {
-    it("disconnects client on shutdown", async () => {
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
-      await skill.shutdown();
-
-      expect(mockClient.disconnect).toHaveBeenCalled();
+    it("completes shutdown without error", async () => {
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
+      await expect(skill.shutdown()).resolves.toBeUndefined();
     });
   });
 
   describe("getRequiredConfig", () => {
     it("returns empty array", () => {
-      const skill = new McpServerSkill("filesystem", config, sampleTools, mockClient);
+      const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       expect(skill.getRequiredConfig()).toEqual([]);
     });
   });

@@ -119,6 +119,12 @@ export class ContentSanitizer {
       .replace(/<!here>/gi, "&lt;!here&gt;");
   }
 
+  /** Sanitize output for Telegram. Strips control characters and truncates if needed. */
+  static sanitizeForTelegram(text: string): string {
+    if (!text) return "";
+    return this.stripControlChars(text);
+  }
+
   /** Sanitize error messages to remove sensitive information. */
   static sanitizeErrorMessage(message: string): string {
     if (!message) return "";

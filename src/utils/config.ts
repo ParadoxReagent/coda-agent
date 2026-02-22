@@ -79,6 +79,12 @@ const SlackConfigSchema = z.object({
   allowed_user_ids: z.array(z.string()),
 });
 
+const TelegramConfigSchema = z.object({
+  bot_token: z.string(),
+  chat_id: z.string(),
+  allowed_user_ids: z.array(z.string()),
+});
+
 const RemindersConfigSchema = z.object({
   timezone: z.string().default("America/New_York"),
   check_interval_seconds: z.number().default(60),
@@ -92,7 +98,7 @@ const NotesConfigSchema = z.object({
 
 const AlertRuleSchema = z.object({
   severity: z.enum(["high", "medium", "low"]),
-  channels: z.array(z.enum(["discord", "slack"])),
+  channels: z.array(z.enum(["discord", "slack", "telegram"])),
   quietHours: z.boolean().default(true),
   cooldown: z.number().default(300),
 });
@@ -238,6 +244,33 @@ const ExecutionConfigSchema = z.object({
   ]),
 });
 
+const BrowserConfigSchema = z.object({
+  /** Enable/disable the browser automation skill. */
+  enabled: z.boolean().default(false),
+  /** Docker socket path (leave default unless using a remote Docker host). */
+  docker_socket: z.string().default("/var/run/docker.sock"),
+  /** Docker image for the browser sandbox container. */
+  image: z.string().default("coda-browser-sandbox"),
+  /** Docker network name for browser containers (internet-only, isolated from coda-internal). */
+  sandbox_network: z.string().default("coda-browser-sandbox"),
+  /** Maximum number of concurrent browser sessions. */
+  max_sessions: z.number().default(3),
+  /** Idle session timeout in seconds — sessions inactive longer than this are auto-destroyed. */
+  session_timeout_seconds: z.number().default(300),
+  /** MCP tool call timeout in milliseconds. */
+  tool_timeout_ms: z.number().default(30000),
+  /**
+   * Optional URL allowlist. If non-empty, browser_navigate is restricted to these domains.
+   * Subdomains are automatically included (e.g. "example.com" allows "www.example.com").
+   */
+  url_allowlist: z.array(z.string()).default([]),
+  /**
+   * URL blocklist — these domains are always blocked regardless of allowlist.
+   * Private IP ranges and internal hostnames are always blocked (not configurable).
+   */
+  url_blocklist: z.array(z.string()).default([]),
+});
+
 const McpTransportSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("stdio"),
@@ -273,6 +306,47 @@ const McpConfigSchema = z.object({
   servers: z.record(McpServerConfigSchema).default({}),
 });
 
+const SpecialistPresetOverrideSchema = z.object({
+  system_prompt: z.string().optional(),
+  allowed_tools: z.array(z.string()).optional(),
+  blocked_tools: z.array(z.string()).optional(),
+  default_model: z.string().optional(),
+  default_provider: z.string().optional(),
+  token_budget: z.number().optional(),
+  max_tool_calls: z.number().optional(),
+  enabled: z.boolean().default(true),
+});
+
+const SelfImprovementConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  opus_provider: z.string().optional(),
+  opus_model: z.string().optional(),
+  reflection_cron: z.string().default("0 3 * * 0"), // Sunday 3 AM
+  assessment_enabled: z.boolean().default(true),
+  prompt_evolution_enabled: z.boolean().default(false),
+  max_reflection_input_tokens: z.number().default(8000),
+  approval_channel: z.string().default("discord"),
+  routing_retrain_cron: z.string().default("0 4 * * 0"), // Sunday 4 AM
+  // 5.3 Critique Loop
+  critique_enabled: z.boolean().default(true),
+  critique_min_tier: z.number().default(3),
+  // 5.4 Gap Detection
+  gap_detection_enabled: z.boolean().default(true),
+  gap_detection_cron: z.string().default("0 2 1 * *"), // 1st of month 2 AM
+  // 5.7 Few-Shot Library
+  few_shot_enabled: z.boolean().default(true),
+  few_shot_harvest_cron: z.string().default("0 4 1 * *"), // 1st of month 4 AM
+  few_shot_min_score: z.number().default(4),
+  few_shot_min_tool_calls: z.number().default(2),
+});
+
+const TasksConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  resume_cron: z.string().default("*/15 * * * *"),
+  max_active_per_user: z.number().default(5),
+  max_auto_resume_attempts: z.number().default(3),
+});
+
 const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   skills: SkillsConfigSchema.default({}),
@@ -295,6 +369,7 @@ const AppConfigSchema = z.object({
     })
     .default({}),
   slack: SlackConfigSchema.optional(),
+  telegram: TelegramConfigSchema.optional(),
   reminders: RemindersConfigSchema.optional(),
   notes: NotesConfigSchema.optional(),
   memory: MemoryConfigSchema.optional(),
@@ -308,9 +383,16 @@ const AppConfigSchema = z.object({
   security: SecurityConfigSchema.optional(),
   execution: ExecutionConfigSchema.optional(),
   mcp: McpConfigSchema.optional(),
+  self_improvement: SelfImprovementConfigSchema.optional(),
+  tasks: TasksConfigSchema.optional(),
+  specialists: z.record(SpecialistPresetOverrideSchema).optional(),
+  browser: BrowserConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
+export type SelfImprovementConfig = z.infer<typeof SelfImprovementConfigSchema>;
+export type TasksConfig = z.infer<typeof TasksConfigSchema>;
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
 export type FirecrawlConfig = z.infer<typeof FirecrawlConfigSchema>;
 export type WeatherConfig = z.infer<typeof WeatherConfigSchema>;
@@ -322,6 +404,8 @@ export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 export type McpConfig = z.infer<typeof McpConfigSchema>;
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 export type McpTransport = z.infer<typeof McpTransportSchema>;
+export type SpecialistPresetOverride = z.infer<typeof SpecialistPresetOverrideSchema>;
+export type SpecialistsConfig = Record<string, SpecialistPresetOverride>;
 
 /**
  * Load configuration from YAML file with environment variable overrides.
@@ -414,6 +498,16 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     }
   }
 
+  // Telegram overrides
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    const telegram = ensureObject(config, "telegram");
+    telegram.bot_token = process.env.TELEGRAM_BOT_TOKEN;
+    if (process.env.TELEGRAM_CHAT_ID) telegram.chat_id = process.env.TELEGRAM_CHAT_ID;
+    if (process.env.TELEGRAM_ALLOWED_USER_IDS) {
+      telegram.allowed_user_ids = process.env.TELEGRAM_ALLOWED_USER_IDS.split(",");
+    }
+  }
+
   // Memory service overrides
   if (process.env.MEMORY_API_KEY) {
     const memory = ensureObject(config, "memory");
@@ -472,6 +566,16 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
   if (process.env.EXECUTION_DEFAULT_IMAGE) {
     const execution = ensureObject(config, "execution");
     execution.default_image = process.env.EXECUTION_DEFAULT_IMAGE;
+  }
+
+  // Browser automation overrides
+  if (process.env.BROWSER_ENABLED !== undefined) {
+    const browser = ensureObject(config, "browser");
+    browser.enabled = process.env.BROWSER_ENABLED === "true";
+  }
+  if (process.env.BROWSER_IMAGE) {
+    const browser = ensureObject(config, "browser");
+    browser.image = process.env.BROWSER_IMAGE;
   }
 
   // Set defaults for llm config

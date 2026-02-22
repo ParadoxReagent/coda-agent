@@ -215,6 +215,30 @@ export class MemorySkill implements Skill {
   }
 
   /**
+   * Save a synthesized task summary after a notable multi-tool turn.
+   * Uses higher importance than raw auto-ingest and a "task-summary" content type.
+   * Fire-and-forget: logs errors but doesn't throw.
+   */
+  async saveTaskSummary(
+    content: string,
+    userId?: string,
+    tags?: string[]
+  ): Promise<void> {
+    try {
+      await this.client.ingest({
+        content,
+        content_type: "summary",
+        tags: [...(tags ?? []), "task-summary", "auto-generated"],
+        importance: 0.6,
+        user_id: userId,
+      });
+      this.logger.debug({ userId, contentLength: content.length }, "Task summary saved to memory");
+    } catch (err) {
+      this.logger.error({ error: err, userId }, "Failed to save task summary to memory");
+    }
+  }
+
+  /**
    * Public method for auto-ingesting conversation turns.
    * Fire-and-forget: logs errors but doesn't throw.
    */

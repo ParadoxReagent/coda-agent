@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/agents dist/agents && cp -r src/core/prompts dist/core/prompts",
     "build:skill-images": "tsx src/scripts/build-skill-images.ts",
     "build:mcp-images": "tsx src/scripts/build-mcp-images.ts",
     "dev": "tsx watch src/main.ts",
@@ -41,6 +41,7 @@
     "pino": "^9.6.0",
     "postgres": "^3.4.0",
     "semver": "^7.6.0",
+    "grammy": "^1.35.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

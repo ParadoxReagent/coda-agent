@@ -3,18 +3,24 @@ import { createMcpSkills } from "../../../../src/integrations/mcp/factory.js";
 import type { McpConfig } from "../../../../src/utils/config.js";
 import type { Logger } from "../../../../src/utils/logger.js";
 
-// Mock the McpClientWrapper
-vi.mock("../../../../src/integrations/mcp/client.js", () => ({
-  McpClientWrapper: vi.fn().mockImplementation(() => ({
-    connect: vi.fn(),
-    listTools: vi.fn().mockResolvedValue([
-      {
-        name: "test_tool",
-        description: "A test tool",
-        inputSchema: { type: "object", properties: {} },
-      },
-    ]),
-    disconnect: vi.fn(),
+// Mock the McpServerManager
+const mockRegisterServer = vi.fn();
+const mockEnsureConnected = vi.fn().mockResolvedValue([
+  {
+    name: "test_tool",
+    description: "A test tool",
+    inputSchema: { type: "object", properties: {} },
+  },
+]);
+const mockGetClient = vi.fn();
+const mockStartIdleTimeoutMonitor = vi.fn();
+
+vi.mock("../../../../src/integrations/mcp/manager.js", () => ({
+  McpServerManager: vi.fn().mockImplementation(() => ({
+    registerServer: mockRegisterServer,
+    ensureConnected: mockEnsureConnected,
+    getClient: mockGetClient,
+    startIdleTimeoutMonitor: mockStartIdleTimeoutMonitor,
   })),
 }));
 
@@ -24,6 +30,15 @@ describe("factory", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Reset ensureConnected to default behavior after clearAllMocks
+    mockEnsureConnected.mockResolvedValue([
+      {
+        name: "test_tool",
+        description: "A test tool",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ]);
 
     mockLogger = {
       info: vi.fn(),
@@ -55,7 +70,7 @@ describe("factory", () => {
 
   describe("createMcpSkills", () => {
     it("creates skills for enabled servers", async () => {
-      const skills = await createMcpSkills(config, mockLogger);
+      const { skills } = await createMcpSkills(config, mockLogger);
 
       expect(skills).toHaveLength(1);
       expect(skills[0].skill.name).toBe("mcp_filesystem");
@@ -64,7 +79,7 @@ describe("factory", () => {
     it("skips disabled servers", async () => {
       config.servers.filesystem.enabled = false;
 
-      const skills = await createMcpSkills(config, mockLogger);
+      const { skills } = await createMcpSkills(config, mockLogger);
 
       expect(skills).toHaveLength(0);
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -89,37 +104,29 @@ describe("factory", () => {
         auto_refresh_tools: false,
       };
 
-      const skills = await createMcpSkills(config, mockLogger);
+      const { skills } = await createMcpSkills(config, mockLogger);
 
       expect(skills).toHaveLength(2);
       expect(skills.map((s) => s.skill.name)).toContain("mcp_filesystem");
       expect(skills.map((s) => s.skill.name)).toContain("mcp_github");
     });
 
-    it("logs connection success with tool count", async () => {
+    it("logs lazy registration for default startup mode", async () => {
       await createMcpSkills(config, mockLogger);
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.objectContaining({
-          server: "filesystem",
-          totalTools: 1,
-          filteredTools: 1,
-        }),
-        "MCP server connected and tools discovered"
+        { server: "filesystem" },
+        "MCP server registered (lazy mode, will connect on first use)"
       );
     });
 
     it("continues on connection failure and logs error", async () => {
-      const { McpClientWrapper } = await import("../../../../src/integrations/mcp/client.js");
+      mockEnsureConnected.mockRejectedValueOnce(new Error("Connection refused"));
 
-      vi.mocked(McpClientWrapper).mockImplementationOnce(() => ({
-        connect: vi.fn().mockRejectedValue(new Error("Connection refused")),
-        listTools: vi.fn(),
-        disconnect: vi.fn(),
-      })) as any;
-
+      config.servers.filesystem.startup_mode = "eager";
       config.servers.github = {
         enabled: true,
+        startup_mode: "eager",
         transport: { type: "http", url: "https://mcp.example.com" },
         timeout_ms: 30000,
         tool_timeout_ms: 60000,
@@ -130,7 +137,7 @@ describe("factory", () => {
         auto_refresh_tools: false,
       };
 
-      const skills = await createMcpSkills(config, mockLogger);
+      const { skills } = await createMcpSkills(config, mockLogger);
 
       // First server failed, second should still be created
       expect(skills).toHaveLength(1);
@@ -139,34 +146,20 @@ describe("factory", () => {
           server: "filesystem",
           error: "Connection refused",
         }),
-        "Failed to connect to MCP server, skipping"
+        "Failed to initialize MCP server, skipping"
       );
     });
 
-    it("applies tool blocklist during discovery", async () => {
-      const { McpClientWrapper } = await import("../../../../src/integrations/mcp/client.js");
-
-      vi.mocked(McpClientWrapper).mockImplementationOnce(() => ({
-        connect: vi.fn(),
-        listTools: vi.fn().mockResolvedValue([
-          { name: "read", description: "Read", inputSchema: {} },
-          { name: "write", description: "Write", inputSchema: {} },
-          { name: "delete", description: "Delete", inputSchema: {} },
-        ]),
-        disconnect: vi.fn(),
-      })) as any;
-
+    it("applies tool blocklist via registerServer config", async () => {
       config.servers.filesystem.tool_blocklist = ["write", "delete"];
 
-      const skills = await createMcpSkills(config, mockLogger);
+      await createMcpSkills(config, mockLogger);
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
+      expect(mockRegisterServer).toHaveBeenCalledWith(
+        "filesystem",
         expect.objectContaining({
-          totalTools: 3,
-          filteredTools: 1,
-          blocked: ["write", "delete"],
-        }),
-        "MCP server connected and tools discovered"
+          tool_blocklist: ["write", "delete"],
+        })
       );
     });
   });

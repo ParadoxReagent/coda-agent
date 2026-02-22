@@ -44,6 +44,12 @@ function createMockProviderManager(
       provider,
       model: "mock-model",
     }),
+    getForUserTiered: vi.fn().mockResolvedValue({
+      provider,
+      model: "mock-model",
+      failedOver: false,
+    }),
+    isTierEnabled: vi.fn(() => false),
     trackUsage: vi.fn().mockResolvedValue(undefined),
   } as unknown as ProviderManager;
 }
@@ -165,7 +171,7 @@ describe("Notes Context Integration", () => {
       );
 
       // Should still work without crashing
-      expect(response).toBe("Hello!");
+      expect(response.text).toBe("Hello!");
       const chatCall = provider.chatMock.mock.calls[0]![0];
       expect(chatCall.system).not.toContain("User notes (always visible)");
     });

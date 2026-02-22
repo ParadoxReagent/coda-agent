@@ -38,6 +38,12 @@ describe("Orchestrator", () => {
         provider: mockProvider,
         model: "mock-model",
       })),
+      getForUserTiered: vi.fn(async () => ({
+        provider: mockProvider,
+        model: "mock-model",
+        failedOver: false,
+      })),
+      isTierEnabled: vi.fn(() => false),
       trackUsage: vi.fn(async () => {}),
       usage: { getDailyUsage: vi.fn(() => []), getTodayTotalCost: vi.fn(() => null) },
       listProviders: vi.fn(() => []),
@@ -68,7 +74,7 @@ describe("Orchestrator", () => {
 
     expect(mockProvider.chatMock).toHaveBeenCalledOnce();
     const call = mockProvider.chatMock.mock.calls[0]![0]!;
-    expect(call.system).toContain("coda");
+    expect(call.system).toContain("Milo");
     expect(call.messages).toHaveLength(1);
     expect(call.messages[0]!.content).toBe("Hi");
   });
@@ -82,7 +88,7 @@ describe("Orchestrator", () => {
       TEST_USER_ID, "Hi", TEST_CHANNEL
     );
 
-    expect(result).toBe("Hello there!");
+    expect(result.text).toBe("Hello there!");
   });
 
   it("executes tool calls when stopReason is tool_use and loops correctly", async () => {
@@ -112,7 +118,7 @@ describe("Orchestrator", () => {
       TEST_USER_ID, "Do something", TEST_CHANNEL
     );
 
-    expect(result).toBe("Done!");
+    expect(result.text).toBe("Done!");
     expect(mockProvider.chatMock).toHaveBeenCalledTimes(2);
   });
 
@@ -134,7 +140,7 @@ describe("Orchestrator", () => {
       TEST_USER_ID, "loop", TEST_CHANNEL
     );
 
-    expect(result).toContain("maximum number of actions");
+    expect(result.text).toContain("maximum number of actions");
   });
 
   it("handles LLM API errors", async () => {
@@ -205,7 +211,7 @@ describe("Orchestrator", () => {
       TEST_USER_ID, `confirm ${token}`, TEST_CHANNEL
     );
 
-    expect(result).toContain("Confirmed");
+    expect(result.text).toContain("Confirmed");
   });
 
   it("returns error for invalid confirmation token", async () => {
@@ -213,6 +219,6 @@ describe("Orchestrator", () => {
       TEST_USER_ID, "confirm ABCDEFGHIJKLMNOP", TEST_CHANNEL
     );
 
-    expect(result).toContain("Invalid or expired");
+    expect(result.text).toContain("Invalid or expired");
   });
 });
