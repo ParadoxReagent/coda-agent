@@ -346,6 +346,7 @@ export class BrowserService {
       "--cap-drop=ALL",
       "--cap-add=SYS_PTRACE",    // Required by Chromium crashpad handler
       "--security-opt=no-new-privileges",
+      "--security-opt=seccomp=unconfined", // Chromium needs syscalls blocked by default seccomp
       "--read-only",
       // Writable tmpfs for browser temp files and profile
       "--tmpfs", "/tmp:rw,nosuid,size=256m",

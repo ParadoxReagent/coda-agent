@@ -79,6 +79,12 @@ const SlackConfigSchema = z.object({
   allowed_user_ids: z.array(z.string()),
 });
 
+const TelegramConfigSchema = z.object({
+  bot_token: z.string(),
+  chat_id: z.string(),
+  allowed_user_ids: z.array(z.string()),
+});
+
 const RemindersConfigSchema = z.object({
   timezone: z.string().default("America/New_York"),
   check_interval_seconds: z.number().default(60),
@@ -92,7 +98,7 @@ const NotesConfigSchema = z.object({
 
 const AlertRuleSchema = z.object({
   severity: z.enum(["high", "medium", "low"]),
-  channels: z.array(z.enum(["discord", "slack"])),
+  channels: z.array(z.enum(["discord", "slack", "telegram"])),
   quietHours: z.boolean().default(true),
   cooldown: z.number().default(300),
 });
@@ -363,6 +369,7 @@ const AppConfigSchema = z.object({
     })
     .default({}),
   slack: SlackConfigSchema.optional(),
+  telegram: TelegramConfigSchema.optional(),
   reminders: RemindersConfigSchema.optional(),
   notes: NotesConfigSchema.optional(),
   memory: MemoryConfigSchema.optional(),
@@ -488,6 +495,16 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
     if (process.env.SLACK_CHANNEL_ID) slack.channel_id = process.env.SLACK_CHANNEL_ID;
     if (process.env.SLACK_ALLOWED_USER_IDS) {
       slack.allowed_user_ids = process.env.SLACK_ALLOWED_USER_IDS.split(",");
+    }
+  }
+
+  // Telegram overrides
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    const telegram = ensureObject(config, "telegram");
+    telegram.bot_token = process.env.TELEGRAM_BOT_TOKEN;
+    if (process.env.TELEGRAM_CHAT_ID) telegram.chat_id = process.env.TELEGRAM_CHAT_ID;
+    if (process.env.TELEGRAM_ALLOWED_USER_IDS) {
+      telegram.allowed_user_ids = process.env.TELEGRAM_ALLOWED_USER_IDS.split(",");
     }
   }
 

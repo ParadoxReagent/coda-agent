@@ -291,3 +291,46 @@ The Slack interface supports file attachments for both inbound and outbound mess
 2. Bot downloads file using `url_private_download` with authorization
 3. LLM processes file (e.g., via agent skill with code execution)
 4. Bot uploads result file(s) to the same thread using `files.uploadV2`
+
+### Telegram
+
+Mobile-first interface using the [Telegraf](https://telegraf.js.org/) library with Telegram Bot API long polling.
+
+**Inbound file attachments:**
+- Users can send documents and photos to the bot
+- Files are downloaded via `getFileLink()` + `fetch()`
+- Documents preserve their original filename and MIME type
+- Photos are downloaded as JPEG at highest available resolution
+- Maximum file size: 20 MB (Telegram Bot API limit)
+- Temporary files are cleaned up after processing
+
+**Outbound file attachments:**
+- Output files are sent using `ctx.replyWithDocument()` via `Input.fromLocalFile()`
+- Text responses are chunked at 4000 characters (Telegram max: 4096)
+
+**Setup:**
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and get the bot token
+2. Get your chat ID (send a message to the bot, then call `https://api.telegram.org/bot<TOKEN>/getUpdates`)
+3. Get your user ID from the update response (`message.from.id`)
+
+```yaml
+telegram:
+  bot_token: ""          # or TELEGRAM_BOT_TOKEN
+  chat_id: ""            # or TELEGRAM_CHAT_ID (numeric chat ID)
+  allowed_user_ids: []   # or TELEGRAM_ALLOWED_USER_IDS (comma-separated)
+```
+
+Or via environment variables:
+
+```bash
+TELEGRAM_BOT_TOKEN=1234567890:AAF...
+TELEGRAM_CHAT_ID=-100123456789
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+```
+
+**Security model:**
+- Only responds to the configured `chat_id` (ignores all other chats)
+- Only responds to users in `allowed_user_ids` (numeric Telegram user IDs)
+- Bot messages are ignored
+- Same temp-dir lifecycle as Discord/Slack (cleanup on completion, preserved on pending confirmation)

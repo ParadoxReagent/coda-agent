@@ -109,6 +109,11 @@ weather: {}         # Free NWS API, no key needed
 #   channel_id: ""
 #   allowed_user_ids: []
 
+# telegram:
+#   bot_token: ""       # or TELEGRAM_BOT_TOKEN (get from @BotFather)
+#   chat_id: ""         # or TELEGRAM_CHAT_ID (numeric chat ID)
+#   allowed_user_ids: [] # or TELEGRAM_ALLOWED_USER_IDS (comma-separated numeric user IDs)
+
 # subagents:
 #   enabled: true
 #   default_timeout_minutes: 5

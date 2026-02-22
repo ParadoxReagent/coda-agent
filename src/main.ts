@@ -17,8 +17,10 @@ import { SkillRegistry } from "./skills/registry.js";
 import { ExternalSkillLoader } from "./skills/loader.js";
 import { DiscordBot } from "./interfaces/discord-bot.js";
 import { SlackBot } from "./interfaces/slack-bot.js";
+import { TelegramBot } from "./interfaces/telegram-bot.js";
 import { DiscordAlertSink } from "./core/sinks/discord-sink.js";
 import { SlackAlertSink } from "./core/sinks/slack-sink.js";
+import { TelegramAlertSink } from "./core/sinks/telegram-sink.js";
 import { RestApi } from "./interfaces/rest-api.js";
 import { SkillHealthTracker } from "./core/skill-health.js";
 import { RateLimiter } from "./core/rate-limiter.js";
@@ -639,6 +641,24 @@ async function main() {
   const discordSink = new DiscordAlertSink(discordBot);
   alertRouter.registerSink("discord", discordSink);
 
+  // Start Telegram bot (optional)
+  let telegramBot: TelegramBot | undefined;
+  if (config.telegram) {
+    telegramBot = new TelegramBot(
+      {
+        botToken: config.telegram.bot_token,
+        chatId: config.telegram.chat_id,
+        allowedUserIds: config.telegram.allowed_user_ids,
+      },
+      orchestrator,
+      logger
+    );
+    await telegramBot.start();
+
+    const telegramSink = new TelegramAlertSink(telegramBot);
+    alertRouter.registerSink("telegram", telegramSink);
+  }
+
   // Start Slack bot (optional)
   let slackBot: SlackBot | undefined;
   if (config.slack) {
@@ -666,6 +686,8 @@ async function main() {
       await discordBot.sendNotification(message);
     } else if (channel === "slack" && slackBot) {
       await slackBot.sendNotification(message);
+    } else if (channel === "telegram" && telegramBot) {
+      await telegramBot.sendNotification(message);
     } else {
       // Default to Discord for unknown channels
       await discordBot.sendNotification(message);
@@ -683,6 +705,13 @@ async function main() {
       id: "slack",
       name: "Slack",
       send: (msg) => slackBot!.sendNotification(msg),
+    });
+  }
+  if (telegramBot) {
+    messageSender.registerChannel({
+      id: "telegram",
+      name: "Telegram",
+      send: (msg) => telegramBot!.sendNotification(msg),
     });
   }
 
@@ -716,6 +745,7 @@ async function main() {
     await subagentManager.shutdown();
     await discordBot.stop();
     if (slackBot) await slackBot.stop();
+    if (telegramBot) await telegramBot.stop();
     await restApi.stop();
     if (mcpManager) await mcpManager.shutdown();
     await skillRegistry.shutdownAll();

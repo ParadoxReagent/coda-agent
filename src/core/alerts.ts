@@ -8,12 +8,13 @@ import {
   formatAlertPlainText,
   formatAlertForDiscord,
   formatAlertForSlack,
+  formatAlertForTelegram,
 } from "./alert-formatters.js";
 import type { PreferencesManager } from "./preferences.js";
 
 export interface AlertRule {
   severity: "high" | "medium" | "low";
-  channels: ("discord" | "slack")[];
+  channels: ("discord" | "slack" | "telegram")[];
   quietHours: boolean;
   cooldown: number;
 }
@@ -167,6 +168,9 @@ export class AlertRouter {
             await sink.sendRich(channel, formatted);
           } else if (sink.sendRich && channel === "slack") {
             const formatted = formatAlertForSlack(event);
+            await sink.sendRich(channel, formatted);
+          } else if (sink.sendRich && channel === "telegram") {
+            const formatted = formatAlertForTelegram(event);
             await sink.sendRich(channel, formatted);
           } else {
             const message = formatAlertPlainText(event);

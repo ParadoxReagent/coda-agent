@@ -126,7 +126,7 @@ Auto-trigger structured memory writes on significant task completion.
 
 ---
 
-## Phase 2 — New Capabilities: Browser, Permissions (~22-28 hours)
+## Phase 2 — New Capabilities: Browser, Permissions ✅ (~22-28 hours)
 
 *Theme: Add the highest-impact capability (browser) and the safety layer they require.*
 
@@ -145,18 +145,26 @@ Playwright MCP in ephemeral Docker containers (stdio transport via McpClientWrap
 
 **Security layers**: `coda-browser-sandbox` network (no `coda-internal` access) · private IP blocklist (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x) · `--cap-drop=ALL` · `--read-only` + tmpfs · `--no-new-privileges` · 1g/1CPU/512PID · `--rm` ephemeral · audit logged · critique on navigate
 
-### 🔲 2.2 Telegram Interface
+### ✅ 2.2 Telegram Interface
 Third messaging interface, mobile-first. Same pattern as Discord/Slack.
 
-- `telegraf` library, `orchestrator.handleMessage()` integration, file attachments
-- User allowlisting, same security model as Discord/Slack
+**Implemented:**
+- `TelegramBot` (`src/interfaces/telegram-bot.ts`): long polling via `telegraf`, handles text + document + photo messages
+- `TelegramAlertSink` (`src/core/sinks/telegram-sink.ts`): alert sink wired to `alertRouter`
+- `TelegramConfigSchema` added to `config.ts`; env overrides `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ALLOWED_USER_IDS`
+- `formatAlertForTelegram` added to `alert-formatters.ts`
+- `sanitizeForTelegram` added to `sanitizer.ts`
+- `"telegram"` added to `AlertRule.channels` union and `AlertRuleSchema` enum
+- Wired in `main.ts`: bot start, alert sink registration, MessageSender channel, subagent announce callback, graceful shutdown
+- Config example sections added to `config.example.yaml` and `config.yaml`
 
 ```yaml
 telegram:
-  bot_token: ""
-  allowed_user_ids: []
+  bot_token: ""          # or TELEGRAM_BOT_TOKEN
+  chat_id: ""            # or TELEGRAM_CHAT_ID (numeric chat ID)
+  allowed_user_ids: []   # or TELEGRAM_ALLOWED_USER_IDS (comma-separated)
 ```
-- **Files**: `src/interfaces/telegram-bot.ts`
+- **Files**: `src/interfaces/telegram-bot.ts`, `src/core/sinks/telegram-sink.ts`
 - **Effort: S-M** (3-4 hrs)
 
 ---
