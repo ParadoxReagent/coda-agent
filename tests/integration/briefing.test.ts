@@ -150,7 +150,7 @@ describe("Morning Briefing Integration", () => {
 
     // Should still succeed — the LLM can compose from available skills
     expect(response).toBeDefined();
-    expect(typeof response).toBe("string");
+    expect(typeof response.text).toBe("string");
   });
 
   it("briefing triggers tool calls when LLM decides to use them", async () => {
@@ -244,9 +244,9 @@ describe("Morning Briefing Integration", () => {
       TEST_CHANNEL
     );
 
-    expect(response).toContain("Q1 Report");
-    expect(response).toContain("Team standup");
-    expect(response).toContain("Call dentist");
+    expect(response.text).toContain("Q1 Report");
+    expect(response.text).toContain("Team standup");
+    expect(response.text).toContain("Call dentist");
 
     // LLM was called twice: initial + after tool results
     expect(provider.chatMock).toHaveBeenCalledTimes(2);

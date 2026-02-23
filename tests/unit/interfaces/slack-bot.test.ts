@@ -32,7 +32,7 @@ import type { SkillRegistry } from "../../../src/skills/registry.js";
 describe("SlackBot", () => {
   let bot: SlackBot;
   const mockOrchestrator = {
-    handleMessage: vi.fn().mockResolvedValue("Bot response"),
+    handleMessage: vi.fn().mockResolvedValue({ text: "Bot response" }),
   } as unknown as Orchestrator;
   const mockProviderManager = {} as unknown as ProviderManager;
   const mockSkills = {} as unknown as SkillRegistry;
@@ -106,7 +106,9 @@ describe("SlackBot", () => {
     expect(mockOrchestrator.handleMessage).toHaveBeenCalledWith(
       "U001",
       "what is the weather?",
-      "slack"
+      "slack",
+      undefined,
+      expect.any(String)
     );
     expect(mockSay).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -39,3 +39,27 @@ export interface OrchestratorResponse {
   /** Whether a confirmation is pending (temp dir should not be cleaned up yet) */
   pendingConfirmation?: boolean;
 }
+
+/**
+ * Extract output files from a tool result JSON string.
+ * Looks for { output_files: [...] } in the result string.
+ */
+export function extractOutputFiles(result: string): OutboundFile[] {
+  try {
+    const parsed = JSON.parse(result);
+    if (parsed.output_files && Array.isArray(parsed.output_files)) {
+      return parsed.output_files.filter(
+        (f: unknown): f is OutboundFile =>
+          typeof f === "object" &&
+          f !== null &&
+          "name" in f &&
+          "path" in f &&
+          typeof f.name === "string" &&
+          typeof f.path === "string"
+      );
+    }
+  } catch {
+    // Result is not JSON or doesn't contain output_files
+  }
+  return [];
+}

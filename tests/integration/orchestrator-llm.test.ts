@@ -71,7 +71,7 @@ describe("Orchestrator + LLM Integration", () => {
       TEST_USER_ID, "Hello", TEST_CHANNEL
     );
 
-    expect(result).toBe("Hello from Claude!");
+    expect(result.text).toBe("Hello from Claude!");
     expect(mockAnthropicProvider.chatMock).toHaveBeenCalledOnce();
   });
 
@@ -88,7 +88,7 @@ describe("Orchestrator + LLM Integration", () => {
       TEST_USER_ID, "Hello", TEST_CHANNEL
     );
 
-    expect(result).toBe("Hello from GPT!");
+    expect(result.text).toBe("Hello from GPT!");
   });
 
   it("end-to-end: message triggers tool use → tool executes → final response", async () => {
@@ -117,7 +117,7 @@ describe("Orchestrator + LLM Integration", () => {
       TEST_USER_ID, "Do the thing", TEST_CHANNEL
     );
 
-    expect(result).toBe("Here's what I found: Tool result data");
+    expect(result.text).toBe("Here's what I found: Tool result data");
     expect(skill.execute).toHaveBeenCalledWith("test_action", { q: "test" });
   });
 
@@ -153,7 +153,7 @@ describe("Orchestrator + LLM Integration", () => {
       TEST_USER_ID, "Second", TEST_CHANNEL
     );
 
-    expect(result).toBe("OpenAI reply");
+    expect(result.text).toBe("OpenAI reply");
   });
 
   it("token usage is tracked across multiple turns", async () => {

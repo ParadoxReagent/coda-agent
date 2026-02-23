@@ -7,6 +7,7 @@ import type { LLMProvider, LLMMessage, LLMContentBlock, LLMToolDefinition } from
 import type { SkillRegistry } from "../skills/registry.js";
 import type { Logger } from "../utils/logger.js";
 import { ResilientExecutor } from "./resilient-executor.js";
+import { extractOutputFiles } from "./types.js";
 
 const DEFAULT_MAX_TOOL_CALLS = 10;
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
@@ -207,23 +208,7 @@ export class BaseAgent {
         results.push({ toolCallId: tc.id, toolName: tc.name, result });
 
         // Extract output files from tool result
-        try {
-          const parsed = JSON.parse(result);
-          if (parsed.output_files && Array.isArray(parsed.output_files)) {
-            const files = parsed.output_files.filter(
-              (f: unknown): f is { name: string; path: string; mimeType?: string } =>
-                typeof f === "object" &&
-                f !== null &&
-                "name" in f &&
-                "path" in f &&
-                typeof f.name === "string" &&
-                typeof f.path === "string"
-            );
-            this.outputFiles.push(...files);
-          }
-        } catch {
-          // Result is not JSON or doesn't contain output_files
-        }
+        this.outputFiles.push(...extractOutputFiles(result));
       } catch (err) {
         this.logger.error(
           { agent: this.config.name, toolName: tc.name, error: err },

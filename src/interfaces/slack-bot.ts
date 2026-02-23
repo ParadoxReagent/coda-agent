@@ -7,21 +7,13 @@ import type { InboundAttachment, OrchestratorResponse } from "../core/types.js";
 import { ContentSanitizer } from "../core/sanitizer.js";
 import { TempDirManager } from "../core/temp-dir.js";
 import { formatUserFacingError } from "./user-facing-error.js";
+import { chunkResponse } from "../utils/text.js";
 
 interface SlackBotConfig {
   appToken: string;
   botToken: string;
   channelId: string;
   allowedUserIds: string[];
-}
-
-/** Chunk a string into pieces of max `size` characters. */
-function chunkResponse(text: string, size: number): string[] {
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += size) {
-    chunks.push(text.slice(i, i + size));
-  }
-  return chunks;
 }
 
 export class SlackBot {
@@ -225,15 +217,12 @@ export class SlackBot {
         if (orchestratorResponse.files && orchestratorResponse.files.length > 0 && channel) {
           for (const file of orchestratorResponse.files) {
             try {
-              const uploadParams: any = {
+              await this.app.client.files.uploadV2({
                 channel_id: channel,
                 file: file.path,
                 filename: file.name,
-              };
-              if (replyThread) {
-                uploadParams.thread_ts = replyThread;
-              }
-              await this.app.client.files.uploadV2(uploadParams);
+                ...(replyThread && { thread_ts: replyThread }),
+              } as Parameters<typeof this.app.client.files.uploadV2>[0]);
               this.logger.debug(
                 { fileName: file.name },
                 "Uploaded response file"

@@ -165,7 +165,7 @@ describe("Notes Context Integration", () => {
       );
 
       // Should still work without crashing
-      expect(response).toBe("Hello!");
+      expect(response.text).toBe("Hello!");
       const chatCall = provider.chatMock.mock.calls[0]![0];
       expect(chatCall.system).not.toContain("User notes (always visible)");
     });

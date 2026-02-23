@@ -22,6 +22,7 @@ import { ContentSanitizer } from "../core/sanitizer.js";
 import { TempDirManager } from "../core/temp-dir.js";
 import type { McpServerManager } from "../integrations/mcp/manager.js";
 import { formatUserFacingError } from "./user-facing-error.js";
+import { chunkResponse } from "../utils/text.js";
 
 interface DiscordBotConfig {
   botToken: string;
@@ -29,13 +30,24 @@ interface DiscordBotConfig {
   allowedUserIds: string[];
 }
 
-/** Chunk a string into pieces of max `size` characters. */
-function chunkResponse(text: string, size: number): string[] {
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += size) {
-    chunks.push(text.slice(i, i + size));
-  }
-  return chunks;
+/** Format a usage entry's cost as a human-readable string. */
+function formatUsageCost(entry: { usageTracked: boolean; estimatedCost: number | null }): string {
+  if (!entry.usageTracked) return "usage not tracked";
+  if (entry.estimatedCost === null) return "cost not configured";
+  return `$${entry.estimatedCost.toFixed(4)}`;
+}
+
+/** Format a usage entry as a single display line. */
+function formatUsageLine(u: {
+  provider: string;
+  model: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  requestCount: number;
+  usageTracked: boolean;
+  estimatedCost: number | null;
+}): string {
+  return `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${formatUsageCost(u)})`;
 }
 
 export class DiscordBot {
@@ -470,24 +482,14 @@ export class DiscordBot {
           if (lightUsage && lightUsage.length > 0) {
             statusText += "\nLight tier:\n";
             for (const u of lightUsage) {
-              const costStr = u.usageTracked
-                ? u.estimatedCost !== null
-                  ? `$${u.estimatedCost.toFixed(4)}`
-                  : "cost not configured"
-                : "usage not tracked";
-              statusText += `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})\n`;
+              statusText += `${formatUsageLine(u)}\n`;
             }
           }
 
           if (heavyUsage && heavyUsage.length > 0) {
             statusText += "\nHeavy tier:\n";
             for (const u of heavyUsage) {
-              const costStr = u.usageTracked
-                ? u.estimatedCost !== null
-                  ? `$${u.estimatedCost.toFixed(4)}`
-                  : "cost not configured"
-                : "usage not tracked";
-              statusText += `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})\n`;
+              statusText += `${formatUsageLine(u)}\n`;
             }
           }
 
@@ -510,15 +512,7 @@ export class DiscordBot {
 
           let usageText = "No usage today.";
           if (usage.length > 0) {
-            const lines = usage.map((u) => {
-              const costStr = u.usageTracked
-                ? u.estimatedCost !== null
-                  ? `$${u.estimatedCost.toFixed(4)}`
-                  : "cost not configured"
-                : "usage not tracked";
-              return `  ${u.provider}/${u.model}: ${u.totalInputTokens} in / ${u.totalOutputTokens} out (${u.requestCount} requests, ${costStr})`;
-            });
-            usageText = lines.join("\n");
+            usageText = usage.map(formatUsageLine).join("\n");
           }
 
           await interaction.reply(

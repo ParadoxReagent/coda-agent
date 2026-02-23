@@ -187,30 +187,20 @@ async function main() {
   skillRegistry.register(new SchedulerSkill(taskScheduler));
   skillRegistry.register(new N8nSkill(), config.n8n);
 
-  // Memory registers conditionally (requires API key)
-  if (config.memory) {
-    try {
-      skillRegistry.register(new MemorySkill(), config.memory);
-    } catch (err) {
-      logger.warn({ error: err }, "Memory skill not registered — missing config");
-    }
-  }
+  // Register optional skills that depend on config
+  const optionalSkills: Array<{ skill: import("./skills/base.js").Skill; config: Record<string, unknown> | undefined }> = [
+    { skill: new MemorySkill(), config: config.memory },
+    { skill: new FirecrawlSkill(), config: config.firecrawl },
+    { skill: new WeatherSkill(), config: config.weather },
+  ];
 
-  // Firecrawl registers conditionally (requires config or env var)
-  if (config.firecrawl) {
-    try {
-      skillRegistry.register(new FirecrawlSkill(), config.firecrawl);
-    } catch (err) {
-      logger.warn({ error: err }, "Firecrawl skill not registered — missing config");
-    }
-  }
-
-  // Weather registers conditionally (no API key required, just config)
-  if (config.weather) {
-    try {
-      skillRegistry.register(new WeatherSkill(), config.weather);
-    } catch (err) {
-      logger.warn({ error: err }, "Weather skill not registered — missing config");
+  for (const { skill, config: skillConfig } of optionalSkills) {
+    if (skillConfig) {
+      try {
+        skillRegistry.register(skill, skillConfig);
+      } catch (err) {
+        logger.warn({ error: err }, `${skill.name} skill not registered — missing config`);
+      }
     }
   }
 
