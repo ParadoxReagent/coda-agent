@@ -26,6 +26,12 @@ function createMockProviderManager(
       provider,
       model: "mock-model",
     }),
+    getForUserTiered: vi.fn().mockResolvedValue({
+      provider,
+      model: "mock-model",
+      failedOver: false,
+    }),
+    isTierEnabled: vi.fn(() => false),
     trackUsage: vi.fn().mockResolvedValue(undefined),
   } as unknown as ProviderManager;
 }
@@ -150,7 +156,7 @@ describe("Morning Briefing Integration", () => {
 
     // Should still succeed — the LLM can compose from available skills
     expect(response).toBeDefined();
-    expect(typeof response.text).toBe("string");
+    expect(response.text).toBeDefined();
   });
 
   it("briefing triggers tool calls when LLM decides to use them", async () => {

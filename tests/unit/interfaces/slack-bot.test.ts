@@ -1,5 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock TempDirManager, fs/promises, and ContentSanitizer before importing SlackBot
+vi.mock("../../../src/core/temp-dir.js", () => ({
+  TempDirManager: {
+    create: vi.fn().mockResolvedValue("/tmp/mock"),
+    cleanup: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+vi.mock("node:fs/promises", () => ({
+  writeFile: vi.fn(),
+  mkdir: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../../src/core/sanitizer.js", () => ({
+  ContentSanitizer: { sanitizeForSlack: vi.fn((t: string) => t) },
+}));
+
 // Mock @slack/bolt before importing SlackBot
 const mockSay = vi.fn();
 const mockReactionsAdd = vi.fn().mockResolvedValue({ ok: true });

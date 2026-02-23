@@ -13,6 +13,11 @@ export function createLogger(name?: string) {
   const logger = pino({
     name: name ?? "coda",
     level: process.env.LOG_LEVEL ?? "info",
+    serializers: {
+      // Pino only serializes Error objects for the `err` key by default.
+      // Add `error` so logger.error({ error: someError }) shows message + stack.
+      error: pino.stdSerializers.err,
+    },
     redact: {
       paths: [
         "msg.emailBody",

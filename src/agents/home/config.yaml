@@ -1,0 +1,6 @@
+description: "Household management: reminders, notes, weather, and personal organisation"
+enabled: true
+default_model: "google/gemini-3-flash-preview"
+default_provider: "openrouter"
+token_budget: 30000
+max_tool_calls: null

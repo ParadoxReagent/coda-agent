@@ -1,0 +1,6 @@
+description: "Web research and synthesis: scraping, searching, and summarising information"
+enabled: true
+default_model: "anthropic/claude-sonnet-4.6"
+default_provider: "openrouter"
+token_budget: 80000
+max_tool_calls: null

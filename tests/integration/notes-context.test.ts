@@ -44,6 +44,12 @@ function createMockProviderManager(
       provider,
       model: "mock-model",
     }),
+    getForUserTiered: vi.fn().mockResolvedValue({
+      provider,
+      model: "mock-model",
+      failedOver: false,
+    }),
+    isTierEnabled: vi.fn(() => false),
     trackUsage: vi.fn().mockResolvedValue(undefined),
   } as unknown as ProviderManager;
 }

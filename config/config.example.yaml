@@ -9,6 +9,15 @@ llm:
       models:
         - "claude-sonnet-4-5-20250514"
         - "claude-haiku-3-5-20241022"
+  # Tier routing — use a cheaper model for simple requests, expensive for complex ones
+  tiers:
+    enabled: false
+    light:
+      provider: "anthropic"
+      model: "claude-haiku-3-5-20241022"
+    heavy:
+      provider: "anthropic"
+      model: "claude-sonnet-4-5-20250514"
 
 discord:
   bot_token: ""       # or DISCORD_BOT_TOKEN
@@ -44,11 +53,6 @@ weather: {}         # Free NWS API, no key needed
 #   MEMORY_API_KEY           → semantic memory
 #   EXECUTION_ENABLED=true   → Docker code execution
 #   SLACK_APP_TOKEN + SLACK_BOT_TOKEN → Slack interface
-#
-# Tier routing (cost optimization):
-#   TIER_ENABLED=true
-#   TIER_LIGHT_MODEL=claude-haiku-3-5-20241022
-#   TIER_HEAVY_MODEL=claude-sonnet-4-5-20250514
 #
 # Uncomment sections below to customize defaults:
 
@@ -86,11 +90,64 @@ weather: {}         # Free NWS API, no key needed
 #     - "alpine:*"
 #     - "coda-skill-*"  # Pre-built skill images (use npm run build:skill-images)
 
+# browser:
+#   enabled: false  # or BROWSER_ENABLED=true
+#   #
+#   # Connection mode:
+#   #   docker — spawn an isolated Docker container per session (default, production)
+#   #            Build image first: docker compose --profile mcp-build build
+#   #   host   — launch Chromium directly on the host (development/testing only)
+#   #            Requires: npx playwright install chromium
+#   mode: "docker"                          # "docker" or "host"
+#   image: "coda-browser-sandbox"          # or BROWSER_IMAGE (docker mode only)
+#   sandbox_network: "coda-browser-sandbox" # Internet-only network (docker mode only)
+#   max_sessions: 3                         # Max concurrent browser sessions
+#   session_timeout_seconds: 300            # Auto-destroy sessions idle > this (seconds)
+#   tool_timeout_ms: 30000                  # Per-operation timeout (navigate, click, etc.)
+#   connect_timeout_ms: 15000              # WebSocket connection timeout per attempt (docker mode)
+#   connect_retries: 3                     # Retry attempts when connecting to container (docker mode)
+#   headless: true                         # Run headless (host mode only; docker is always headless)
+#   # URL allowlist — if non-empty, only these domains are reachable
+#   url_allowlist: []
+#   # Additional URL blocklist (private IPs/localhost are always blocked)
+#   url_blocklist: []
+
+# n8n:
+#   webhooks:
+#     # Auto-approved webhook — called without confirmation prompt (read-only operations)
+#     web_research:
+#       url: "https://n8n.example.com/webhook/your-webhook-id"
+#       timeout_ms: 30000
+#       description: "Web research — searches the web and returns summarized results"
+#       requires_confirmation: false   # ← enables n8n_call_webhook (no prompt)
+#     #
+#     # Confirmation-required webhook (default when field is omitted)
+#     send_email:
+#       url: "https://n8n.example.com/webhook/another-webhook-id"
+#       timeout_ms: 10000
+#       description: "Send an email via n8n"
+#       # requires_confirmation: true  ← default; use n8n_trigger_webhook
+#     #
+#     # Webhook with authentication
+#     private_workflow:
+#       url: "https://n8n.example.com/webhook/private-id"
+#       timeout_ms: 15000
+#       description: "Internal workflow requiring API key"
+#       auth:
+#         type: header
+#         name: "X-Api-Key"
+#         value: "your-secret-key"  # or use ${ENV_VAR} substitution
+
 # slack:
 #   app_token: ""  # or SLACK_APP_TOKEN
 #   bot_token: ""  # or SLACK_BOT_TOKEN
 #   channel_id: ""
 #   allowed_user_ids: []
+
+# telegram:
+#   bot_token: ""       # or TELEGRAM_BOT_TOKEN (get from @BotFather)
+#   chat_id: ""         # or TELEGRAM_CHAT_ID (numeric chat ID)
+#   allowed_user_ids: [] # or TELEGRAM_ALLOWED_USER_IDS (comma-separated numeric user IDs)
 
 # subagents:
 #   enabled: true
@@ -104,6 +161,64 @@ weather: {}         # Free NWS API, no key needed
 #   output_repair:
 #     enabled: true
 #     quick_fix_only: true  # SECURITY: true = no LLM repair (prevents injection)
+
+# ── Self-Improvement Engine (Phase 4) ────────────
+# Weekly Opus reflection, self-scoring, prompt evolution, learned routing.
+# All sub-features are opt-in. Requires audit data to accumulate first.
+#
+# self_improvement:
+#   enabled: true
+#   opus_model: "claude-opus-4-6"      # Optional: use specific Opus model for reflection
+#   reflection_cron: "0 3 * * 0"       # Sunday 3 AM (weekly Opus reflection)
+#   assessment_enabled: true           # Post-turn self-scoring via Haiku
+#   prompt_evolution_enabled: false    # Auto-apply approved prompt proposals (opt-in)
+#   max_reflection_input_tokens: 8000  # Max tokens sent to Opus for reflection
+#   approval_channel: "discord"        # Channel to deliver proposal summaries
+#   routing_retrain_cron: "0 4 * * 0"  # Sunday 4 AM (learned classifier retraining)
+#   # 5.3 Critique Loop — Haiku safety review before high-tier tool calls
+#   critique_enabled: true             # Enable pre-execution critique for tier >= critique_min_tier
+#   critique_min_tier: 3               # Minimum permission tier to trigger critique
+#   # 5.4 Gap Detection — Monthly Opus analysis of capability gaps
+#   gap_detection_enabled: true        # Enable monthly capability gap detection
+#   gap_detection_cron: "0 2 1 * *"   # 1st of month 2 AM
+#   # 5.7 Few-Shot Library — Harvest and inject solution patterns
+#   few_shot_enabled: true             # Enable few-shot pattern harvesting and injection
+#   few_shot_harvest_cron: "0 4 1 * *" # 1st of month 4 AM
+#   few_shot_min_score: 4              # Min self-assessment score to qualify for harvest (0-5)
+#   few_shot_min_tool_calls: 2         # Min tool calls in interaction to qualify
+
+# ── Specialist Agents (Phase 5.2) ────────────────
+# Per-agent overrides for directory-based specialists (home, research, lab, planner, ...).
+# Specialist agents are defined as directories in src/agents/{name}/ containing:
+#   soul.md       — system prompt (plain markdown)
+#   tools.md      — allowed tools (one per line, # comments ok)
+#   config.yaml   — description, model, token_budget, etc.
+#   references/   — optional .md/.txt/.json docs appended to the system prompt
+#
+# All agents work with zero configuration. The specialists: section below allows
+# per-agent overrides without editing agent directory files.
+#
+# specialists:
+#   research:
+#     system_prompt: "Custom research specialist prompt..."  # Override system prompt
+#     allowed_tools:                      # Override allowed tools
+#       - firecrawl_scrape
+#       - firecrawl_search
+#       - note_save
+#     token_budget: 60000                # Override token budget
+#   lab:
+#     default_model: "claude-opus-4-6"   # Use a specific model for this specialist
+#     default_provider: "anthropic"
+#     max_tool_calls: 50                 # Override max tool calls
+
+# ── Long-Horizon Tasks (Phase 4.5) ───────────────
+# Persistent multi-day task tracking with checkpointing and auto-resumption.
+#
+# tasks:
+#   enabled: true
+#   resume_cron: "*/15 * * * *"        # Check for resumable tasks every 15 min
+#   max_active_per_user: 5             # Max concurrent active tasks per user
+#   max_auto_resume_attempts: 3        # Max auto-resumes without user interaction
 
 # ── Alert Routing ────────────────────────────────
 # Routes alert.* events from the event bus to Discord/Slack.
@@ -165,7 +280,22 @@ alerts:
     timezone: "America/New_York"      # Timezone for quiet hours
     override_severities: ["high"]     # Severities that bypass quiet hours
 
-# MCP (Model Context Protocol) Integration
+# ── Audit & Observability ────────────────────────
+# All tool calls are automatically logged to the audit_log table.
+# No configuration required — always on. The agent can query its own
+# audit history via the audit_query and audit_stats tools.
+#
+# Routing decisions are logged to routing_decisions table automatically
+# when tier routing is enabled (TIER_ENABLED=true).
+
+# ── Message Sender (Proactive Outbound) ──────────
+# Controls how proactive messages are rate-limited.
+# Skills use ctx.messageSender.send(channelId, message) to send proactively.
+#
+# message_sender:
+#   rate_limit: 10  # Max messages per channel per hour (default: 10)
+
+# ── MCP (Model Context Protocol) Integration
 # Connect to external MCP servers and use their tools as coda skills
 # See docs/mcp-integration.md for complete documentation
 #

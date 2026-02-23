@@ -171,6 +171,97 @@ firecrawl:
 
 Activate the `web-research` agent skill via `skill_activate` for guided research strategies including quick fact-finding, documentation exploration, and deep multi-source research. See [skills_readme.md](skills_readme.md#web-research) for details.
 
+## Browser Sandbox
+
+Playwright-based browser automation using Playwright's direct Node.js API with ephemeral, network-isolated Docker containers. Use this for interactive web tasks that Firecrawl's read-only scraping cannot handle: logging into portals, filling forms, navigating SPAs, taking screenshots.
+
+**Architecture (docker mode — production):**
+
+```
+coda-core (coda-internal network)
+    │
+    ├── Docker socket (/var/run/docker.sock)
+    │
+    └── BrowserService.createSession()
+         │
+         └── docker run -d --rm --network coda-browser-sandbox ...
+              │
+              └── playwright-server.js (WebSocket on :3000/playwright)
+                   │
+                   └── Chromium (headless, ephemeral)
+                        │
+                        └── Internet only (no coda-internal access)
+         │
+         └── chromium.connect(ws://container-ip:3000/playwright)
+              │
+              └── Direct Playwright Node.js API (no MCP protocol layer)
+```
+
+**Architecture (host mode — development):**
+
+```
+coda-core
+    │
+    └── chromium.launch() — Chromium runs directly on the host
+```
+
+The direct Playwright API eliminates the MCP stdio protocol layer, which was prone to `McpError(ConnectionClosed)` failures when Docker exited before completing the MCP handshake. Tool call timeouts are now native Playwright timeouts (always respected), not broken AbortController wrappers.
+
+**Build the image (docker mode):**
+
+```bash
+docker compose --profile mcp-build build
+# or: docker build -t coda-browser-sandbox src/skills/browser/
+```
+
+**Create the sandbox network (one-time, auto-created by docker compose up):**
+
+```bash
+docker network create coda-browser-sandbox
+```
+
+**Enable in config (docker mode):**
+
+```yaml
+browser:
+  enabled: true
+  mode: "docker"
+  image: "coda-browser-sandbox"
+  sandbox_network: "coda-browser-sandbox"
+  max_sessions: 3                   # Max concurrent sessions
+  session_timeout_seconds: 300      # 5-minute idle timeout
+  tool_timeout_ms: 30000
+  connect_timeout_ms: 15000         # WS connection timeout per attempt
+  connect_retries: 3                # Retry attempts per session creation
+  url_allowlist: []                 # Optional: restrict to specific domains
+  url_blocklist: []                 # Additional blocked domains
+```
+
+**Enable in config (host mode — development):**
+
+```yaml
+browser:
+  enabled: true
+  mode: "host"
+  headless: true   # false to see the browser window
+```
+Also run once: `npx playwright install chromium`
+
+**Container security flags applied at runtime (docker mode):**
+
+```
+--cap-drop=ALL                           No Linux capabilities
+--security-opt=no-new-privileges         No privilege escalation
+--read-only                              Read-only root filesystem
+--tmpfs /tmp:rw,nosuid,size=256m         Writable temp storage
+--tmpfs /home/pwuser:rw,nosuid,size=128m Browser profile
+--shm-size 256m                          Chromium shared memory
+--memory 1g --cpus 1 --pids-limit 512   Resource limits
+--network coda-browser-sandbox           Internet-only (no internal access)
+```
+
+**Skill documentation:** See [skills_readme.md](skills_readme.md#browser-automation) for tool reference, permission tiers, and the SSRF protection model.
+
 ## Interfaces
 
 ### Discord
@@ -225,3 +316,46 @@ The Slack interface supports file attachments for both inbound and outbound mess
 2. Bot downloads file using `url_private_download` with authorization
 3. LLM processes file (e.g., via agent skill with code execution)
 4. Bot uploads result file(s) to the same thread using `files.uploadV2`
+
+### Telegram
+
+Mobile-first interface using the [Telegraf](https://telegraf.js.org/) library with Telegram Bot API long polling.
+
+**Inbound file attachments:**
+- Users can send documents and photos to the bot
+- Files are downloaded via `getFileLink()` + `fetch()`
+- Documents preserve their original filename and MIME type
+- Photos are downloaded as JPEG at highest available resolution
+- Maximum file size: 20 MB (Telegram Bot API limit)
+- Temporary files are cleaned up after processing
+
+**Outbound file attachments:**
+- Output files are sent using `ctx.replyWithDocument()` via `Input.fromLocalFile()`
+- Text responses are chunked at 4000 characters (Telegram max: 4096)
+
+**Setup:**
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and get the bot token
+2. Get your chat ID (send a message to the bot, then call `https://api.telegram.org/bot<TOKEN>/getUpdates`)
+3. Get your user ID from the update response (`message.from.id`)
+
+```yaml
+telegram:
+  bot_token: ""          # or TELEGRAM_BOT_TOKEN
+  chat_id: ""            # or TELEGRAM_CHAT_ID (numeric chat ID)
+  allowed_user_ids: []   # or TELEGRAM_ALLOWED_USER_IDS (comma-separated)
+```
+
+Or via environment variables:
+
+```bash
+TELEGRAM_BOT_TOKEN=1234567890:AAF...
+TELEGRAM_CHAT_ID=-100123456789
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+```
+
+**Security model:**
+- Only responds to the configured `chat_id` (ignores all other chats)
+- Only responds to users in `allowed_user_ids` (numeric Telegram user IDs)
+- Bot messages are ignored
+- Same temp-dir lifecycle as Discord/Slack (cleanup on completion, preserved on pending confirmation)

@@ -60,6 +60,7 @@ async def vector_search(
     tags: list[str] | None = None,
     min_similarity: float = 0.3,
     include_archived: bool = False,
+    include_embeddings: bool = False,
 ) -> list[dict[str, Any]]:
     pool = await get_pool()
     embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
@@ -84,11 +85,15 @@ async def vector_search(
     where_clause = " AND ".join(conditions)
     params.append(limit)
 
+    # Only select the embedding column when needed (it's large — 384 floats)
+    embedding_col = ", embedding::text AS embedding_text" if include_embeddings else ""
+
     query = f"""
         SELECT
             id, content, content_type, tags, importance, source_type,
             source_id, metadata, access_count, created_at, updated_at,
             1 - (embedding <=> $1::vector) AS cosine_similarity
+            {embedding_col}
         FROM memories
         WHERE {where_clause}
         ORDER BY embedding <=> $1::vector ASC
@@ -112,7 +117,21 @@ async def vector_search(
                 ids,
             )
 
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        r = dict(row)
+        if include_embeddings and r.get("embedding_text"):
+            # Parse the vector text representation "[f1,f2,...]" back to list[float]
+            raw = r.pop("embedding_text")
+            try:
+                r["embedding"] = [float(v) for v in raw.strip("[]").split(",")]
+            except (ValueError, AttributeError):
+                r["embedding"] = None
+        else:
+            r.pop("embedding_text", None)
+        results.append(r)
+
+    return results
 
 
 async def get_memory_by_id(memory_id: str) -> dict[str, Any] | None:

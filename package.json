@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/agents dist/agents && cp -r src/core/prompts dist/core/prompts",
     "build:skill-images": "tsx src/scripts/build-skill-images.ts",
     "build:mcp-images": "tsx src/scripts/build-mcp-images.ts",
     "dev": "tsx watch src/main.ts",
@@ -17,6 +17,7 @@
     "test:phase2": "vitest run tests/unit/skills tests/integration/briefing tests/integration/notes-context --reporter=verbose",
     "test:phase3": "vitest run tests/unit/utils/id.test.ts tests/unit/core/redis-event-bus.test.ts tests/unit/core/alerts.test.ts tests/unit/core/alert-formatters.test.ts tests/unit/core/scheduler.test.ts tests/unit/skills/scheduler/skill.test.ts tests/integration/alert-pipeline.test.ts --reporter=verbose",
     "test:phase4": "vitest run tests/unit/core/injection-defense.test.ts tests/unit/core/error-handling.test.ts tests/unit/core/llm-resilience.test.ts tests/unit/core/rate-limiting.test.ts tests/unit/core/preferences.test.ts tests/unit/skills/skill-hardening.test.ts tests/unit/interfaces/slack-bot.test.ts tests/integration/multi-channel-alerts.test.ts tests/integration/injection-e2e.test.ts tests/integration/degradation.test.ts tests/integration/cross-channel.test.ts --reporter=verbose",
+    "test:browser": "vitest run tests/unit/skills/browser tests/integration/browser.test.ts",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -34,11 +35,13 @@
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.36.0",
     "fastify": "^5.2.0",
+    "grammy": "^1.35.0",
     "ioredis": "^5.4.0",
     "js-yaml": "^4.1.0",
     "open": "^11.0.0",
     "openai": "^4.80.0",
     "pino": "^9.6.0",
+    "playwright": "^1.58.2",
     "postgres": "^3.4.0",
     "semver": "^7.6.0",
     "zod": "^3.24.0"
@@ -57,5 +60,15 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "undici": ">=6.23.0",
+      "ajv": ">=8.18.0",
+      "qs": ">=6.14.2",
+      "hono": ">=4.11.10",
+      "minimatch": ">=10.2.1",
+      "esbuild": ">=0.25.0"
+    }
+  }
 }

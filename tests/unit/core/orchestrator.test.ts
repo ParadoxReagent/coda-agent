@@ -38,6 +38,12 @@ describe("Orchestrator", () => {
         provider: mockProvider,
         model: "mock-model",
       })),
+      getForUserTiered: vi.fn(async () => ({
+        provider: mockProvider,
+        model: "mock-model",
+        failedOver: false,
+      })),
+      isTierEnabled: vi.fn(() => false),
       trackUsage: vi.fn(async () => {}),
       usage: { getDailyUsage: vi.fn(() => []), getTodayTotalCost: vi.fn(() => null) },
       listProviders: vi.fn(() => []),
@@ -68,7 +74,7 @@ describe("Orchestrator", () => {
 
     expect(mockProvider.chatMock).toHaveBeenCalledOnce();
     const call = mockProvider.chatMock.mock.calls[0]![0]!;
-    expect(call.system).toContain("coda");
+    expect(call.system).toContain("Milo");
     expect(call.messages).toHaveLength(1);
     expect(call.messages[0]!.content).toBe("Hi");
   });

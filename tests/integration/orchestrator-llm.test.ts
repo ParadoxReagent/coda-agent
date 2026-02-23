@@ -41,6 +41,12 @@ describe("Orchestrator + LLM Integration", () => {
         provider: mockAnthropicProvider,
         model: "claude-sonnet-4-5",
       })),
+      getForUserTiered: vi.fn(async () => ({
+        provider: mockAnthropicProvider,
+        model: "claude-sonnet-4-5",
+        failedOver: false,
+      })),
+      isTierEnabled: vi.fn(() => false),
       trackUsage: vi.fn(async () => {}),
       usage: { getDailyUsage: vi.fn(() => []), getTodayTotalCost: vi.fn(() => null) },
       listProviders: vi.fn(() => []),

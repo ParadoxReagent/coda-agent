@@ -2,11 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpServerSkill } from "../../../../src/integrations/mcp/skill.js";
 import type { McpServerConfig } from "../../../../src/utils/config.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { McpClientWrapper } from "../../../../src/integrations/mcp/client.js";
 import type { McpServerManager } from "../../../../src/integrations/mcp/manager.js";
 
 describe("McpServerSkill", () => {
-  let mockClient: McpClientWrapper;
+  let mockClient: { callTool: ReturnType<typeof vi.fn> };
   let mockManager: McpServerManager;
   let config: McpServerConfig;
   let sampleTools: Tool[];
@@ -40,15 +39,11 @@ describe("McpServerSkill", () => {
 
     mockClient = {
       callTool: vi.fn(),
-      disconnect: vi.fn(),
-      isConnected: vi.fn().mockReturnValue(true),
-    } as unknown as McpClientWrapper;
+    };
 
-    // Mock manager that returns mockClient
     mockManager = {
       ensureConnected: vi.fn().mockResolvedValue(sampleTools),
       getClient: vi.fn().mockReturnValue(mockClient),
-      shutdown: vi.fn().mockResolvedValue(undefined),
     } as unknown as McpServerManager;
   });
 
@@ -92,7 +87,7 @@ describe("McpServerSkill", () => {
 
   describe("execute", () => {
     it("calls MCP tool with correct arguments", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "File content",
         isError: false,
       });
@@ -106,7 +101,7 @@ describe("McpServerSkill", () => {
     });
 
     it("returns sanitized success response", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "File content here",
         isError: false,
       });
@@ -123,7 +118,7 @@ describe("McpServerSkill", () => {
 
     it("truncates oversized responses", async () => {
       const largeContent = "A".repeat(150000);
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: largeContent,
         isError: false,
       });
@@ -137,7 +132,7 @@ describe("McpServerSkill", () => {
     });
 
     it("handles error responses from MCP tool", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "Error: File not found",
         isError: true,
       });
@@ -151,7 +146,7 @@ describe("McpServerSkill", () => {
     });
 
     it("handles exceptions during tool call", async () => {
-      vi.mocked(mockClient.callTool).mockRejectedValue(new Error("Connection timeout"));
+      mockClient.callTool.mockRejectedValue(new Error("Connection timeout"));
 
       const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
       const result = await skill.execute("mcp_filesystem_read_file", { path: "/test.txt" });
@@ -170,7 +165,7 @@ describe("McpServerSkill", () => {
         ]
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
@@ -200,7 +195,7 @@ describe("McpServerSkill", () => {
         ]
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
@@ -224,7 +219,7 @@ describe("McpServerSkill", () => {
         text: { "1": "Page 1 content", "2": "Page 2 content" }
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
@@ -240,7 +235,7 @@ describe("McpServerSkill", () => {
     });
 
     it("handles non-JSON MCP response gracefully", async () => {
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: "Plain text response without JSON",
         isError: false,
       });
@@ -261,7 +256,7 @@ describe("McpServerSkill", () => {
         output_files: "not-an-array"  // Invalid format
       });
 
-      vi.mocked(mockClient.callTool).mockResolvedValue({
+      mockClient.callTool.mockResolvedValue({
         content: mcpResponse,
         isError: false,
       });
@@ -279,10 +274,8 @@ describe("McpServerSkill", () => {
   });
 
   describe("shutdown", () => {
-    it("completes without error (disconnection is handled by manager)", async () => {
+    it("completes shutdown without error", async () => {
       const skill = new McpServerSkill("filesystem", config, sampleTools, mockManager);
-
-      // shutdown() is a no-op; disconnection lifecycle is managed by McpServerManager
       await expect(skill.shutdown()).resolves.toBeUndefined();
     });
   });

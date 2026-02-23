@@ -151,6 +151,25 @@ export class N8nSkill implements Skill {
         },
       },
       {
+        name: "n8n_call_webhook",
+        description: "Call an auto-approved n8n webhook without confirmation. Only works for webhooks configured with requires_confirmation: false. Use n8n_list_webhooks to see which webhooks support this.",
+        permissionTier: 2,
+        input_schema: {
+          type: "object",
+          properties: {
+            webhook_name: {
+              type: "string",
+              description: "Name of the registered webhook to call (must have requires_confirmation: false)",
+            },
+            payload: {
+              type: "object",
+              description: "Optional JSON payload to send with the request",
+            },
+          },
+          required: ["webhook_name"],
+        },
+      },
+      {
         name: "n8n_list_webhooks",
         description: "List all registered n8n webhooks that can be triggered.",
         input_schema: { type: "object", properties: {} },
@@ -174,6 +193,8 @@ export class N8nSkill implements Skill {
           return await this.markProcessed(toolInput);
         case "n8n_trigger_webhook":
           return await this.triggerWebhook(toolInput);
+        case "n8n_call_webhook":
+          return await this.callAutoWebhook(toolInput);
         case "n8n_list_webhooks":
           return this.listWebhooks();
         default:
@@ -449,6 +470,37 @@ export class N8nSkill implements Skill {
       });
     }
 
+    return this._executeWebhookCall(name, webhook, payload);
+  }
+
+  private async callAutoWebhook(input: Record<string, unknown>): Promise<string> {
+    const name = input.webhook_name as string;
+    const payload = input.payload as Record<string, unknown> | undefined;
+
+    const webhook = this.webhooks[name];
+    if (!webhook) {
+      const available = Object.keys(this.webhooks);
+      return JSON.stringify({
+        success: false,
+        message: `Unknown webhook "${name}". Available: ${available.length ? available.join(", ") : "none configured"}`,
+      });
+    }
+
+    if (webhook.requires_confirmation !== false) {
+      return JSON.stringify({
+        success: false,
+        message: `Webhook "${name}" requires confirmation. Use n8n_trigger_webhook instead, or set requires_confirmation: false in config to enable auto-calling.`,
+      });
+    }
+
+    return this._executeWebhookCall(name, webhook, payload);
+  }
+
+  private async _executeWebhookCall(
+    name: string,
+    webhook: N8nWebhookConfig,
+    payload: Record<string, unknown> | undefined
+  ): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), webhook.timeout_ms);
 
@@ -513,6 +565,7 @@ export class N8nSkill implements Skill {
     const entries = Object.entries(this.webhooks).map(([name, w]) => ({
       name,
       description: w.description ?? "(no description)",
+      requires_confirmation: w.requires_confirmation !== false,
     }));
     return JSON.stringify({ webhooks: entries, count: entries.length });
   }

@@ -118,6 +118,35 @@ export class McpClientWrapper {
   }
 
   /**
+   * Call an MCP tool and return raw content blocks (preserves image data for callers
+   * that need to handle binary content, e.g. browser screenshots).
+   */
+  async callToolRaw(
+    toolName: string,
+    args: Record<string, unknown>
+  ): Promise<{ content: Array<{ type: string; [key: string]: unknown }>; isError: boolean }> {
+    this.lastActivityTime = Date.now();
+
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => {
+      abortController.abort();
+    }, this.config.tool_timeout_ms);
+
+    try {
+      const result = await this.client.callTool({
+        name: toolName,
+        arguments: args,
+      });
+      return {
+        content: result.content as Array<{ type: string; [key: string]: unknown }>,
+        isError: (result.isError as boolean | undefined) ?? false,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
    * Serialize MCP content blocks to a string.
    * Handles text, image (as description), and embedded resources.
    */

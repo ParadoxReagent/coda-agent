@@ -1,3 +1,5 @@
+import math
+import pytest
 from datetime import datetime, timezone, timedelta
 
 from src.services.ranking import (
@@ -5,6 +7,7 @@ from src.services.ranking import (
     access_bonus,
     combined_relevance,
     rank_results,
+    mmr_rerank,
 )
 
 
@@ -13,6 +16,12 @@ class TestTemporalDecay:
         now = datetime.now(timezone.utc)
         score = temporal_decay(now)
         assert score > 0.99
+
+    def test_30_day_half_life(self):
+        """30 days old should score approximately 0.5."""
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        score = temporal_decay(thirty_days_ago)
+        assert pytest.approx(score, abs=0.01) == 0.5
 
     def test_old_memory_decays(self):
         old = datetime.now(timezone.utc) - timedelta(days=100)
@@ -23,6 +32,11 @@ class TestTemporalDecay:
         old = datetime.now(timezone.utc) - timedelta(days=365)
         score = temporal_decay(old)
         assert score < 0.3
+
+    def test_monotonically_decreasing(self):
+        now = datetime.now(timezone.utc)
+        scores = [temporal_decay(now - timedelta(days=d)) for d in [0, 10, 30, 60, 120]]
+        assert all(scores[i] > scores[i + 1] for i in range(len(scores) - 1))
 
 
 class TestAccessBonus:
@@ -76,4 +90,78 @@ class TestRankResults:
         assert ranked[0]["relevance_score"] > ranked[1]["relevance_score"]
 
 
-import pytest  # noqa: E402 — needed for approx
+def _make_embedding(value: float, dim: int = 4) -> list[float]:
+    """Create a unit-ish embedding pointing in a specific direction."""
+    base = [value] + [0.0] * (dim - 1)
+    mag = math.sqrt(sum(x * x for x in base))
+    return [x / mag for x in base]
+
+
+def _make_result(
+    relevance: float,
+    embedding: list[float] | None,
+    content: str = "test",
+) -> dict:
+    return {
+        "relevance_score": relevance,
+        "embedding": embedding,
+        "content": content,
+        "created_at": datetime.now(timezone.utc),
+        "importance": 0.5,
+        "cosine_similarity": relevance,
+        "access_count": 0,
+    }
+
+
+class TestMmrRerank:
+    def test_empty_input_returns_empty(self):
+        assert mmr_rerank([], top_n=5) == []
+
+    def test_returns_top_n(self):
+        results = [
+            _make_result(0.9, _make_embedding(1.0)),
+            _make_result(0.8, _make_embedding(0.9)),
+            _make_result(0.7, _make_embedding(0.8)),
+            _make_result(0.6, _make_embedding(0.7)),
+        ]
+        selected = mmr_rerank(results, top_n=2)
+        assert len(selected) == 2
+
+    def test_selects_diverse_results(self):
+        """With lambda=0, pure diversity: should avoid selecting near-identical embeddings."""
+        # Two nearly identical embeddings (should only pick one)
+        dup_emb = [1.0, 0.0, 0.0, 0.0]
+        # One very different embedding
+        diff_emb = [0.0, 1.0, 0.0, 0.0]
+
+        results = [
+            _make_result(0.9, dup_emb, "dup-a"),
+            _make_result(0.85, dup_emb, "dup-b"),  # nearly same direction
+            _make_result(0.7, diff_emb, "diverse"),
+        ]
+        # With lambda=0 (pure diversity), after picking dup-a, diverse should beat dup-b
+        selected = mmr_rerank(results, top_n=2, lambda_mmr=0.0)
+        contents = [r["content"] for r in selected]
+        assert "dup-a" in contents
+        assert "diverse" in contents
+
+    def test_no_embeddings_falls_back_to_top_n(self):
+        """If no results have embeddings, return first top_n results unchanged."""
+        results = [
+            _make_result(0.9, None, "a"),
+            _make_result(0.8, None, "b"),
+            _make_result(0.7, None, "c"),
+        ]
+        selected = mmr_rerank(results, top_n=2)
+        assert len(selected) == 2
+
+    def test_lambda_1_is_pure_relevance(self):
+        """With lambda=1, MMR degenerates to sorting by relevance."""
+        emb_a = [1.0, 0.0, 0.0]
+        emb_b = [0.0, 1.0, 0.0]
+        results = [
+            _make_result(0.6, emb_a, "low-relevance"),
+            _make_result(0.9, emb_b, "high-relevance"),
+        ]
+        selected = mmr_rerank(results, top_n=1, lambda_mmr=1.0)
+        assert selected[0]["content"] == "high-relevance"

@@ -1,0 +1,11 @@
+reminder_create
+reminder_list
+reminder_delete
+note_save
+note_search
+note_list
+note_get
+memory_save
+memory_search
+weather_current
+weather_forecast
