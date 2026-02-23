@@ -13,6 +13,10 @@ interface RegisteredSkill {
   tools: Map<string, SkillToolDefinition>;
 }
 
+const INTERNAL_SKILL_NAMES = new Set([
+  "notes", "reminders", "scheduler", "n8n", "memory", "firecrawl", "weather",
+]);
+
 const DEFAULT_SKILL_RATE_LIMITS: Record<string, { maxRequests: number; windowSeconds: number }> = {
   notes: { maxRequests: 100, windowSeconds: 3600 },
   reminders: { maxRequests: 50, windowSeconds: 3600 },
@@ -282,10 +286,7 @@ export class SkillRegistry {
   }
 
   private isInternalSkill(skillName: string): boolean {
-    const internalSkills = new Set([
-      "notes", "reminders", "scheduler", "n8n", "memory", "firecrawl", "weather",
-    ]);
-    return internalSkills.has(skillName);
+    return INTERNAL_SKILL_NAMES.has(skillName);
   }
 
   /**
@@ -320,14 +321,7 @@ export class SkillRegistry {
 
   /** Check if a tool is marked as sensitive (accesses private data). */
   isSensitiveTool(toolName: string): boolean {
-    const skillName = this.toolToSkill.get(toolName);
-    if (!skillName) return false;
-
-    const registered = this.skills.get(skillName);
-    if (!registered) return false;
-
-    const tool = registered.tools.get(toolName);
-    return tool?.sensitive === true;
+    return this.getToolDefinition(toolName)?.sensitive === true;
   }
 
   /** Get a registered skill by name. */

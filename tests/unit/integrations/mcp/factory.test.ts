@@ -139,7 +139,7 @@ describe("factory", () => {
 
       const { skills } = await createMcpSkills(config, mockLogger);
 
-      // First server failed, second should still be created
+      // First server (eager) failed, second (lazy) should still be created
       expect(skills).toHaveLength(1);
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -152,6 +152,7 @@ describe("factory", () => {
 
     it("applies tool blocklist via registerServer config", async () => {
       config.servers.filesystem.tool_blocklist = ["write", "delete"];
+      config.servers.filesystem.startup_mode = "eager";
 
       await createMcpSkills(config, mockLogger);
 

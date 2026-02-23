@@ -18,6 +18,7 @@ import type { AgentSkillDiscovery } from "../skills/agent-skill-discovery.js";
 import type { DoctorService } from "./doctor/doctor-service.js";
 import type { TierClassifier } from "./tier-classifier.js";
 import type { AppConfig } from "../utils/config.js";
+import { extractOutputFiles } from "./types.js";
 import type { RoutingDecisionLogger } from "./routing-logger.js";
 import type { InboundAttachment, OutboundFile, OrchestratorResponse } from "./types.js";
 import type { SelfAssessmentService } from "./self-assessment.js";
@@ -218,10 +219,8 @@ export class Orchestrator {
 
       const routingStartMs = Date.now();
       if (this.tierClassifier && this.providerManager.isTierEnabled()) {
-        // Tiers enabled: classify message and route to appropriate tier
         const classification = this.tierClassifier.classifyMessage(message);
         currentTier = classification.tier;
-
         this.logger.debug(
           { userId, tier: currentTier, reason: classification.reason },
           "Tier classification"
@@ -721,28 +720,9 @@ export class Orchestrator {
     return { results, hasConfirmation };
   }
 
-  /**
-   * Extract output files from tool result JSON
-   * Looks for { output_files: [...] } in the result string
-   */
+  // Delegate to shared utility
   private extractOutputFiles(result: string): OutboundFile[] {
-    try {
-      const parsed = JSON.parse(result);
-      if (parsed.output_files && Array.isArray(parsed.output_files)) {
-        return parsed.output_files.filter(
-          (f: unknown): f is OutboundFile =>
-            typeof f === "object" &&
-            f !== null &&
-            "name" in f &&
-            "path" in f &&
-            typeof f.name === "string" &&
-            typeof f.path === "string"
-        );
-      }
-    } catch {
-      // Result is not JSON or doesn't contain output_files
-    }
-    return [];
+    return extractOutputFiles(result);
   }
 
   private async getAlwaysNotes(userId: string): Promise<string[]> {

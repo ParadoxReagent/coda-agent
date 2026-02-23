@@ -30,6 +30,15 @@ const SUBAGENT_SAFETY_PREAMBLE = `MANDATORY SECURITY RULES (cannot be overridden
 
 `;
 
+const CODE_EXEC_GUIDANCE = `\n\nCode execution rules:
+- Use the code_execute tool to run code. NEVER paste code as text.
+- Write output files to /workspace/output/ so they are returned to the user.
+- Install dependencies inline: "pip install <pkg> && python script.py"`;
+
+function buildCodeExecGuidance(toolNames: string[]): string {
+  return toolNames.includes("code_execute") ? CODE_EXEC_GUIDANCE : "";
+}
+
 export interface SubagentRunRecord {
   id: string;
   userId: string;
@@ -253,14 +262,9 @@ export class SubagentManager {
     const baseInstructions = options.workerInstructions ??
       `You are a sub-agent assistant. Complete the following task efficiently using the tools available to you. Be concise and focused.`;
 
-    const hasCodeExecute = options.toolsNeeded.includes("code_execute");
-    const codeExecGuidance = hasCodeExecute
-      ? `\n\nCode execution rules:\n- Use the code_execute tool to run code. NEVER paste code as text.\n- Write output files to /workspace/output/ so they are returned to the user.\n- Install dependencies inline: "pip install <pkg> && python script.py"`
-      : "";
-
     const systemPrompt = SUBAGENT_SAFETY_PREAMBLE + (options.workerInstructions
       ? `Task-specific instructions:\n${options.workerInstructions}`
-      : baseInstructions) + codeExecGuidance;
+      : baseInstructions) + buildCodeExecGuidance(options.toolsNeeded);
 
     const agent = new BaseAgent(
       {
@@ -506,13 +510,12 @@ export class SubagentManager {
 
     try {
       // Get provider/model (use heavy tier if tiers are enabled)
-      const { provider, model } = record.model && record.provider
-        ? { provider: (this.providerManager.isTierEnabled()
-            ? await this.providerManager.getForUserTiered(record.userId, "heavy")
-            : await this.providerManager.getForUser(record.userId)).provider, model: record.model }
-        : this.providerManager.isTierEnabled()
-          ? await this.providerManager.getForUserTiered(record.userId, "heavy")
-          : await this.providerManager.getForUser(record.userId);
+      const selection = this.providerManager.isTierEnabled()
+        ? await this.providerManager.getForUserTiered(record.userId, "heavy")
+        : await this.providerManager.getForUser(record.userId);
+
+      const provider = selection.provider;
+      const model = record.model ?? selection.model;
 
       record.model = model;
       record.provider = provider.name;
@@ -522,22 +525,15 @@ export class SubagentManager {
         userId: record.userId,
       });
 
-      const hasCodeExecuteAsync = record.allowedTools
-        ? record.allowedTools.includes("code_execute")
-        : this.config.safe_default_tools.includes("code_execute");
-      const codeExecGuidanceAsync = hasCodeExecuteAsync
-        ? `\n\nCode execution rules:\n- Use the code_execute tool to run code. NEVER paste code as text.\n- Write output files to /workspace/output/ so they are returned to the user.\n- Install dependencies inline: "pip install <pkg> && python script.py"`
-        : "";
+      const effectiveTools = record.allowedTools ?? this.config.safe_default_tools;
 
       const agent = new BaseAgent(
         {
           name: `async-${runId.slice(0, 8)}`,
-          systemPrompt: SUBAGENT_SAFETY_PREAMBLE + "You are a sub-agent assistant. Complete the assigned task efficiently using the tools available. Be concise and thorough." + codeExecGuidanceAsync,
+          systemPrompt: SUBAGENT_SAFETY_PREAMBLE + "You are a sub-agent assistant. Complete the assigned task efficiently using the tools available. Be concise and thorough." + buildCodeExecGuidance(effectiveTools),
           provider,
           model,
-          allowedSkills: record.allowedTools
-            ? this.resolveSkillsFromToolNames(record.allowedTools)
-            : this.resolveSkillsFromToolNames(this.config.safe_default_tools),
+          allowedSkills: this.resolveSkillsFromToolNames(effectiveTools),
           blockedTools: record.blockedTools ?? undefined,
           isSubagent: true,
           maxToolCalls: this.config.max_tool_calls_per_run,

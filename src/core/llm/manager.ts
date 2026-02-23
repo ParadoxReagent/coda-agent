@@ -109,72 +109,7 @@ export class ProviderManager {
     const preferredProviderName = pref?.provider ?? this.defaultProvider;
     const preferredModel = pref?.model ?? this.defaultModel;
 
-    // Check if preferred provider is available
-    const breaker = this.circuitBreakers.get(preferredProviderName);
-    if (breaker && breaker.canExecute()) {
-      const provider = this.providers.get(preferredProviderName);
-      if (provider) {
-        return { provider, model: preferredModel };
-      }
-    }
-
-    // Failover: walk the chain
-    for (const fallbackName of this.failoverChain) {
-      if (fallbackName === preferredProviderName) continue;
-
-      const fallbackBreaker = this.circuitBreakers.get(fallbackName);
-      if (fallbackBreaker && !fallbackBreaker.canExecute()) continue;
-
-      const fallbackProvider = this.providers.get(fallbackName);
-      if (!fallbackProvider) continue;
-
-      const models = this.providerModels.get(fallbackName);
-      const fallbackModel = models?.[0] ?? preferredModel;
-
-      this.logger.warn(
-        {
-          userId,
-          originalProvider: preferredProviderName,
-          fallbackProvider: fallbackName,
-        },
-        "Failing over to alternate LLM provider"
-      );
-
-      return {
-        provider: fallbackProvider,
-        model: fallbackModel,
-        failedOver: true,
-        originalProvider: preferredProviderName,
-      };
-    }
-
-    // Try all remaining providers
-    for (const [name, provider] of this.providers) {
-      if (name === preferredProviderName) continue;
-
-      const provBreaker = this.circuitBreakers.get(name);
-      if (provBreaker && !provBreaker.canExecute()) continue;
-
-      const models = this.providerModels.get(name);
-      const model = models?.[0] ?? preferredModel;
-
-      this.logger.warn(
-        { userId, originalProvider: preferredProviderName, fallbackProvider: name },
-        "All failover chain providers unavailable, using any available provider"
-      );
-
-      return {
-        provider,
-        model,
-        failedOver: true,
-        originalProvider: preferredProviderName,
-      };
-    }
-
-    // All providers down
-    throw new Error(
-      "All LLM providers are currently unavailable. Please try again later."
-    );
+    return this.resolveProviderWithFailover(userId, preferredProviderName, preferredModel);
   }
 
   /** Set a user's preferred provider and model. */
@@ -213,75 +148,13 @@ export class ProviderManager {
     const preferredProviderName = tierPref?.provider ?? this.tierConfig[tier].provider;
     const preferredModel = tierPref?.model ?? this.tierConfig[tier].model;
 
-    // Check if preferred provider is available
-    const breaker = this.circuitBreakers.get(preferredProviderName);
-    if (breaker && breaker.canExecute()) {
-      const provider = this.providers.get(preferredProviderName);
-      if (provider) {
-        return { provider, model: preferredModel, tier };
-      }
-    }
-
-    // Failover: walk the chain
-    for (const fallbackName of this.failoverChain) {
-      if (fallbackName === preferredProviderName) continue;
-
-      const fallbackBreaker = this.circuitBreakers.get(fallbackName);
-      if (fallbackBreaker && !fallbackBreaker.canExecute()) continue;
-
-      const fallbackProvider = this.providers.get(fallbackName);
-      if (!fallbackProvider) continue;
-
-      const models = this.providerModels.get(fallbackName);
-      const fallbackModel = models?.[0] ?? preferredModel;
-
-      this.logger.warn(
-        {
-          userId,
-          tier,
-          originalProvider: preferredProviderName,
-          fallbackProvider: fallbackName,
-        },
-        "Failing over to alternate LLM provider for tier"
-      );
-
-      return {
-        provider: fallbackProvider,
-        model: fallbackModel,
-        tier,
-        failedOver: true,
-        originalProvider: preferredProviderName,
-      };
-    }
-
-    // Try all remaining providers
-    for (const [name, provider] of this.providers) {
-      if (name === preferredProviderName) continue;
-
-      const provBreaker = this.circuitBreakers.get(name);
-      if (provBreaker && !provBreaker.canExecute()) continue;
-
-      const models = this.providerModels.get(name);
-      const model = models?.[0] ?? preferredModel;
-
-      this.logger.warn(
-        { userId, tier, originalProvider: preferredProviderName, fallbackProvider: name },
-        "All failover chain providers unavailable for tier, using any available provider"
-      );
-
-      return {
-        provider,
-        model,
-        tier,
-        failedOver: true,
-        originalProvider: preferredProviderName,
-      };
-    }
-
-    // All providers down
-    throw new Error(
-      "All LLM providers are currently unavailable. Please try again later."
+    const selection = await this.resolveProviderWithFailover(
+      userId,
+      preferredProviderName,
+      preferredModel,
+      tier
     );
+    return { ...selection, tier };
   }
 
   /** Set a user's tier-specific provider and model preference. */
@@ -367,5 +240,81 @@ export class ProviderManager {
   getProviderHealth(name: string): string {
     const breaker = this.circuitBreakers.get(name);
     return breaker?.getState() ?? "unknown";
+  }
+
+  /**
+   * Resolve a provider by name with failover through the chain.
+   * Shared logic for both regular and tiered provider resolution.
+   */
+  private async resolveProviderWithFailover(
+    userId: string,
+    preferredProviderName: string,
+    preferredModel: string,
+    tier?: "light" | "heavy"
+  ): Promise<ProviderSelection> {
+    const tierLabel = tier ? ` for tier ${tier}` : "";
+
+    // Check if preferred provider is available
+    const breaker = this.circuitBreakers.get(preferredProviderName);
+    if (breaker && breaker.canExecute()) {
+      const provider = this.providers.get(preferredProviderName);
+      if (provider) {
+        return { provider, model: preferredModel };
+      }
+    }
+
+    // Failover: walk the chain
+    for (const fallbackName of this.failoverChain) {
+      if (fallbackName === preferredProviderName) continue;
+
+      const fallbackBreaker = this.circuitBreakers.get(fallbackName);
+      if (fallbackBreaker && !fallbackBreaker.canExecute()) continue;
+
+      const fallbackProvider = this.providers.get(fallbackName);
+      if (!fallbackProvider) continue;
+
+      const models = this.providerModels.get(fallbackName);
+      const fallbackModel = models?.[0] ?? preferredModel;
+
+      this.logger.warn(
+        { userId, ...(tier && { tier }), originalProvider: preferredProviderName, fallbackProvider: fallbackName },
+        `Failing over to alternate LLM provider${tierLabel}`
+      );
+
+      return {
+        provider: fallbackProvider,
+        model: fallbackModel,
+        failedOver: true,
+        originalProvider: preferredProviderName,
+      };
+    }
+
+    // Try all remaining providers
+    for (const [name, provider] of this.providers) {
+      if (name === preferredProviderName) continue;
+
+      const provBreaker = this.circuitBreakers.get(name);
+      if (provBreaker && !provBreaker.canExecute()) continue;
+
+      const models = this.providerModels.get(name);
+      const model = models?.[0] ?? preferredModel;
+
+      this.logger.warn(
+        { userId, ...(tier && { tier }), originalProvider: preferredProviderName, fallbackProvider: name },
+        `All failover chain providers unavailable${tierLabel}, using any available provider`
+      );
+
+      return {
+        provider,
+        model,
+        failedOver: true,
+        originalProvider: preferredProviderName,
+      };
+    }
+
+    // All providers down
+    throw new Error(
+      "All LLM providers are currently unavailable. Please try again later."
+    );
   }
 }
