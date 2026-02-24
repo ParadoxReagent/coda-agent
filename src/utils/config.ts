@@ -170,6 +170,7 @@ const N8nWebhookEntrySchema = z.object({
   auth: N8nWebhookAuthSchema.optional(),
   timeout_ms: z.number().default(30000),
   description: z.string().optional(),
+  requires_confirmation: z.boolean().optional(),
 });
 
 const N8nConfigSchema = z.object({
@@ -589,6 +590,55 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
   if (process.env.BROWSER_IMAGE) {
     const browser = ensureObject(config, "browser");
     browser.image = process.env.BROWSER_IMAGE;
+  }
+
+  // N8n webhook auth overrides
+  // Convention: N8N_WEBHOOK_<NAME>_AUTH_TYPE (header|basic)
+  //   header: N8N_WEBHOOK_<NAME>_AUTH_NAME + N8N_WEBHOOK_<NAME>_AUTH_VALUE
+  //   basic:  N8N_WEBHOOK_<NAME>_AUTH_USERNAME + N8N_WEBHOOK_<NAME>_AUTH_PASSWORD
+  // <NAME> is the webhook name uppercased with hyphens/dots replaced by underscores.
+  {
+    const n8n = ensureObject(config, "n8n");
+    const webhooks = ensureObject(n8n, "webhooks");
+
+    // Build a map from env-style name → config key for webhooks already in config
+    const envNameToConfigKey = new Map<string, string>();
+    for (const configKey of Object.keys(webhooks)) {
+      const envName = configKey.toUpperCase().replace(/[-. ]/g, "_");
+      envNameToConfigKey.set(envName, configKey);
+    }
+
+    // Also discover webhooks defined purely via env (N8N_WEBHOOK_<NAME>_AUTH_TYPE present)
+    for (const key of Object.keys(process.env)) {
+      const m = key.match(/^N8N_WEBHOOK_(.+)_AUTH_TYPE$/);
+      if (m) {
+        const envName = m[1]!;
+        if (!envNameToConfigKey.has(envName)) {
+          // Use lowercase env name as config key for env-only webhooks
+          envNameToConfigKey.set(envName, envName.toLowerCase());
+        }
+      }
+    }
+
+    for (const [envName, configKey] of envNameToConfigKey) {
+      const authType = process.env[`N8N_WEBHOOK_${envName}_AUTH_TYPE`];
+      if (!authType) continue;
+
+      const webhook = ensureObject(webhooks, configKey);
+      if (authType === "header") {
+        const name = process.env[`N8N_WEBHOOK_${envName}_AUTH_NAME`];
+        const value = process.env[`N8N_WEBHOOK_${envName}_AUTH_VALUE`];
+        if (name && value) {
+          webhook.auth = { type: "header", name, value };
+        }
+      } else if (authType === "basic") {
+        const username = process.env[`N8N_WEBHOOK_${envName}_AUTH_USERNAME`];
+        const password = process.env[`N8N_WEBHOOK_${envName}_AUTH_PASSWORD`];
+        if (username && password) {
+          webhook.auth = { type: "basic", username, password };
+        }
+      }
+    }
   }
 
   // Set defaults for llm config

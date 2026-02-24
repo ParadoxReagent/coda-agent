@@ -133,33 +133,13 @@ export class N8nSkill implements Skill {
       },
       {
         name: "n8n_trigger_webhook",
-        description: "Trigger a registered n8n webhook and return the response. Use to invoke n8n workflows that return data.",
-        requiresConfirmation: true,
+        description: "Trigger a registered n8n webhook and return its response. Webhooks configured with requires_confirmation: false execute immediately. Others require user approval first.",
         input_schema: {
           type: "object",
           properties: {
             webhook_name: {
               type: "string",
               description: "Name of the registered webhook to call (from config)",
-            },
-            payload: {
-              type: "object",
-              description: "Optional JSON payload to send with the request",
-            },
-          },
-          required: ["webhook_name"],
-        },
-      },
-      {
-        name: "n8n_call_webhook",
-        description: "Call an auto-approved n8n webhook without confirmation. Only works for webhooks configured with requires_confirmation: false. Use n8n_list_webhooks to see which webhooks support this.",
-        permissionTier: 2,
-        input_schema: {
-          type: "object",
-          properties: {
-            webhook_name: {
-              type: "string",
-              description: "Name of the registered webhook to call (must have requires_confirmation: false)",
             },
             payload: {
               type: "object",
@@ -193,8 +173,6 @@ export class N8nSkill implements Skill {
           return await this.markProcessed(toolInput);
         case "n8n_trigger_webhook":
           return await this.triggerWebhook(toolInput);
-        case "n8n_call_webhook":
-          return await this.callAutoWebhook(toolInput);
         case "n8n_list_webhooks":
           return this.listWebhooks();
         default:
@@ -470,30 +448,16 @@ export class N8nSkill implements Skill {
       });
     }
 
-    return this._executeWebhookCall(name, webhook, payload);
-  }
-
-  private async callAutoWebhook(input: Record<string, unknown>): Promise<string> {
-    const name = input.webhook_name as string;
-    const payload = input.payload as Record<string, unknown> | undefined;
-
-    const webhook = this.webhooks[name];
-    if (!webhook) {
-      const available = Object.keys(this.webhooks);
-      return JSON.stringify({
-        success: false,
-        message: `Unknown webhook "${name}". Available: ${available.length ? available.join(", ") : "none configured"}`,
-      });
+    if (webhook.requires_confirmation === false) {
+      return this._executeWebhookCall(name, webhook, payload);
     }
 
-    if (webhook.requires_confirmation !== false) {
-      return JSON.stringify({
-        success: false,
-        message: `Webhook "${name}" requires confirmation. Use n8n_trigger_webhook instead, or set requires_confirmation: false in config to enable auto-calling.`,
-      });
-    }
-
-    return this._executeWebhookCall(name, webhook, payload);
+    return JSON.stringify({
+      success: false,
+      requires_confirmation: true,
+      webhook: name,
+      message: `Webhook "${name}" requires user approval before it can be triggered. Ask the user for permission, then retry.`,
+    });
   }
 
   private async _executeWebhookCall(
@@ -501,6 +465,7 @@ export class N8nSkill implements Skill {
     webhook: N8nWebhookConfig,
     payload: Record<string, unknown> | undefined
   ): Promise<string> {
+    this.logger.info({ webhook: name, url: webhook.url }, "Triggering n8n webhook");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), webhook.timeout_ms);
 
@@ -543,6 +508,7 @@ export class N8nSkill implements Skill {
         ? this.sanitizeEventData(responseData as Record<string, unknown>)
         : ContentSanitizer.sanitizeApiResponse(String(responseData));
 
+      this.logger.info({ webhook: name, status: res.status }, "n8n webhook call succeeded");
       return JSON.stringify({
         success: true,
         webhook: name,

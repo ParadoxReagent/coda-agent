@@ -310,6 +310,7 @@ export class Orchestrator {
       let toolCallCount = 0;
       const outputFiles: OutboundFile[] = [];
       let pendingConfirmation = false;
+      const allConfirmationTokens: string[] = [];
 
       while (response.stopReason === "tool_use") {
         toolCallCount += response.toolCalls.length;
@@ -345,7 +346,7 @@ export class Orchestrator {
         this.context.checkSessionToolCalls(userId, channel, true, MAX_TOOL_CALLS_PER_SESSION);
 
         // Execute tool calls
-        const { results: toolResults, hasConfirmation } = await this.executeTools(
+        const { results: toolResults, hasConfirmation, confirmationTokens } = await this.executeTools(
           userId,
           response.toolCalls,
           workingDir
@@ -354,6 +355,7 @@ export class Orchestrator {
         // Track if any confirmation was created
         if (hasConfirmation) {
           pendingConfirmation = true;
+          allConfirmationTokens.push(...confirmationTokens);
         }
 
         // Collect output files from tool results
@@ -495,6 +497,15 @@ export class Orchestrator {
       // 8. Save context, return response
       let finalText = response.text ?? "I didn't have a response for that.";
 
+      // Safety net: if the LLM omitted confirmation tokens, append them so the user always sees them
+      if (pendingConfirmation) {
+        for (const token of allConfirmationTokens) {
+          if (!finalText.includes(token)) {
+            finalText += `\n\nTo proceed, reply with: confirm ${token}`;
+          }
+        }
+      }
+
       // Prepend failover notice if applicable
       if (failedOver && originalProvider) {
         finalText = `Note: Using ${provider.name} because ${originalProvider} is unavailable.\n\n${finalText}`;
@@ -632,9 +643,10 @@ export class Orchestrator {
     userId: string,
     toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
     workingDir?: string
-  ): Promise<{ results: Array<{ toolCallId: string; result: string }>; hasConfirmation: boolean }> {
+  ): Promise<{ results: Array<{ toolCallId: string; result: string }>; hasConfirmation: boolean; confirmationTokens: string[] }> {
     const results: Array<{ toolCallId: string; result: string }> = [];
     let hasConfirmation = false;
+    const confirmationTokens: string[] = [];
 
     for (const tc of toolCalls) {
       try {
@@ -683,6 +695,7 @@ export class Orchestrator {
           );
 
           hasConfirmation = true;
+          confirmationTokens.push(token);
 
           results.push({
             toolCallId: tc.id,
@@ -717,7 +730,7 @@ export class Orchestrator {
       }
     }
 
-    return { results, hasConfirmation };
+    return { results, hasConfirmation, confirmationTokens };
   }
 
   // Delegate to shared utility

@@ -9,3 +9,9 @@ memory_save
 memory_search
 weather_current
 weather_forecast
+n8n_list_webhooks
+n8n_trigger_webhook
+n8n_query_events
+n8n_get_summary
+n8n_list_event_types
+n8n_mark_processed
