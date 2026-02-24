@@ -88,6 +88,7 @@ export class DiscordBot {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
       ],
+      rest: { timeout: 60_000 },
     });
   }
 

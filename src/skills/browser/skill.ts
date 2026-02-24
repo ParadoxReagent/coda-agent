@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { Logger } from "../../utils/logger.js";
@@ -169,7 +170,7 @@ export class BrowserSkill implements Skill {
       {
         name: "browser_screenshot",
         description:
-          "Take a screenshot of the current page. Returns a file path to the saved PNG image.",
+          "Take a screenshot of the current page. Returns a file path to the saved JPEG image.",
         input_schema: {
           type: "object",
           properties: {
@@ -388,6 +389,7 @@ export class BrowserSkill implements Skill {
         success: true,
         file_path: filePath,
         message: `Screenshot saved to ${filePath}`,
+        output_files: [{ name: basename(filePath), path: filePath, mimeType: "image/jpeg" }],
       });
     } catch (err) {
       return JSON.stringify({

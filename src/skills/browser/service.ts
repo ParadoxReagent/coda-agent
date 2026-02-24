@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createConnection } from "node:net";
 import type { Browser, BrowserContext, Page } from "playwright";
 import type { BrowserConfig } from "../../utils/config.js";
 import type { Logger } from "../../utils/logger.js";
@@ -25,7 +26,6 @@ interface BrowserSession {
   lastActivityAt: number;
   createdAt: number;
   userId?: string;
-  screenshotDir: string;
 }
 
 export interface CreateSessionResult {
@@ -90,7 +90,6 @@ export class BrowserService {
     }
 
     const sessionId = randomBytes(8).toString("hex");
-    const screenshotDir = await mkdtemp(join(tmpdir(), `coda-browser-${sessionId}-`));
 
     this.logger.info({ sessionId, userId, mode: this.config.mode }, "Creating browser session");
 
@@ -112,6 +111,7 @@ export class BrowserService {
         await this.preflight();
         await this.startContainer(containerName);
         const containerIp = await this.waitForContainerIp(containerName);
+        await this.waitForPort(containerIp, 3000, containerName);
         browser = await this.connectWithRetry(chromium, containerIp, containerName);
       }
 
@@ -127,7 +127,6 @@ export class BrowserService {
         lastActivityAt: Date.now(),
         createdAt: Date.now(),
         userId,
-        screenshotDir,
       };
       this.sessions.set(sessionId, session);
 
@@ -138,7 +137,6 @@ export class BrowserService {
       if (containerName) {
         await this.forceRemoveContainer(containerName).catch(() => {});
       }
-      await rm(screenshotDir, { recursive: true, force: true }).catch(() => {});
       throw new Error(
         `Failed to start browser session: ${err instanceof Error ? err.message : String(err)}`
       );
@@ -190,13 +188,17 @@ export class BrowserService {
     return lines.join("\n");
   }
 
-  /** Take a screenshot and save it to the session's temp directory. Returns the file path. */
+  /**
+   * Take a screenshot. Each call creates its own independent temp dir so the file
+   * outlives the browser session — browser_close (which used to delete a shared
+   * screenshotDir) will not remove it before the platform bot can upload it.
+   */
   async screenshot(sessionId: string, fullPage: boolean): Promise<string> {
     const session = this.getActiveSession(sessionId);
     session.lastActivityAt = Date.now();
-    const filename = `screenshot-${Date.now()}.png`;
-    const filePath = join(session.screenshotDir, filename);
-    await session.page.screenshot({ path: filePath, fullPage, timeout: this.config.tool_timeout_ms });
+    const dir = await mkdtemp(join(tmpdir(), "coda-screenshot-"));
+    const filePath = join(dir, `screenshot-${Date.now()}.jpg`);
+    await session.page.screenshot({ path: filePath, fullPage, type: "jpeg", quality: 80, timeout: this.config.tool_timeout_ms });
     session.lastActivityAt = Date.now();
     return filePath;
   }
@@ -249,12 +251,6 @@ export class BrowserService {
 
     if (session.containerName) {
       await this.forceRemoveContainer(session.containerName);
-    }
-
-    try {
-      await rm(session.screenshotDir, { recursive: true, force: true });
-    } catch {
-      // non-critical
     }
   }
 
@@ -420,6 +416,40 @@ export class BrowserService {
 
     throw new Error(
       `Timed out waiting for container "${containerName}" to get an IP on network "${this.config.sandbox_network}"`
+    );
+  }
+
+  /**
+   * Poll TCP until the container is accepting connections on the given port.
+   * This bridges the gap between the container getting an IP and the
+   * playwright-server.js process actually binding to port 3000 (Node startup
+   * + Chromium launch can take several seconds).
+   */
+  private async waitForPort(ip: string, port: number, containerName: string): Promise<void> {
+    const deadline = Date.now() + this.config.connect_timeout_ms;
+
+    while (Date.now() < deadline) {
+      const ready = await new Promise<boolean>((resolve) => {
+        const socket = createConnection({ host: ip, port }, () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.on("error", () => {
+          socket.destroy();
+          resolve(false);
+        });
+      });
+
+      if (ready) {
+        this.logger.debug({ containerName, ip, port }, "Container port ready");
+        return;
+      }
+
+      await this.sleep(300);
+    }
+
+    throw new Error(
+      `Timed out waiting for port ${port} to open on container "${containerName}" (${ip}:${port})`
     );
   }
 
