@@ -335,7 +335,7 @@ describe("BrowserService", () => {
     it("returns a .png file path under the session screenshot dir", async () => {
       const { sessionId } = await service.createSession();
       const path = await service.screenshot(sessionId, false);
-      expect(path).toMatch(/^\/tmp\/coda-browser-test-abc\/screenshot-\d+\.png$/);
+      expect(path).toMatch(/^\/tmp\/coda-browser-test-abc\/screenshot-\d+\.jpg$/);
       expect(mockPage.screenshot).toHaveBeenCalledWith(
         expect.objectContaining({ fullPage: false })
       );
