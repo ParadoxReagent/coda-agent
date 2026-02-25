@@ -8,6 +8,8 @@ RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install playwright@1.58.2 --save
 
 COPY playwright-server.js /app/playwright-server.js
 
+USER pwuser
+
 EXPOSE 3000
 
 CMD ["node", "/app/playwright-server.js"]

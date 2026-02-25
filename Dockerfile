@@ -19,7 +19,8 @@ FROM node:22-alpine
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 # Install system dependencies
-RUN apk add --no-cache docker-cli su-exec python3 py3-pip
+RUN apk add --no-cache su-exec python3 py3-pip
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /app
 
@@ -32,11 +33,12 @@ COPY --from=builder /app/dist ./dist
 COPY src/db/migrations ./db/migrations
 COPY src/skills/agent-skills/ ./dist/skills/agent-skills/
 
-# Copy MCP server files and install Python dependencies
-COPY src/integrations/mcp/servers/ ./src/integrations/mcp/servers/
+# Install Python dependencies before copying all MCP source (cache layer optimization)
+COPY src/integrations/mcp/servers/pdf/requirements.txt ./mcp-pdf-requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages \
   --timeout 120 --retries 5 \
-  -r src/integrations/mcp/servers/pdf/requirements.txt
+  -r mcp-pdf-requirements.txt
+COPY src/integrations/mcp/servers/ ./src/integrations/mcp/servers/
 
 ENV NODE_ENV=production
 EXPOSE 3000

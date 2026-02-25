@@ -290,125 +290,146 @@ export class DiscordBot {
       return;
     }
 
+    // Acknowledge immediately to avoid the 3-second Discord timeout.
+    // If this fails (10062 Unknown interaction), the token is already expired and
+    // there is nothing we can do — log a warning and bail out rather than erroring.
+    try {
+      await interaction.deferReply();
+    } catch (err) {
+      this.logger.warn({ error: err }, "Could not defer reply — interaction expired before processing");
+      return;
+    }
+
     const { commandName } = interaction;
 
-    switch (commandName) {
-      case "ping":
-        await interaction.reply("Pong!");
-        break;
+    try {
+      switch (commandName) {
+        case "ping":
+          await interaction.editReply("Pong!");
+          break;
 
-      case "status": {
-        const skills = this.skills.listSkills();
-        const lines = skills.map(
-          (s) => `**${s.name}**: ${s.description} (${s.tools.length} tools)`
-        );
-        await interaction.reply(
-          `**coda Status**\nSkills loaded: ${skills.length}\n${lines.join("\n") || "No skills loaded."}`
-        );
-        break;
-      }
-
-      case "help": {
-        const skills = this.skills.listSkills();
-        const lines = skills.map(
-          (s) => `- **${s.name}**: ${s.description}\n  Tools: ${s.tools.join(", ")}`
-        );
-        await interaction.reply(
-          `**Available Skills**\n${lines.join("\n") || "No skills loaded."}`
-        );
-        break;
-      }
-
-      case "model": {
-        const subcommand = interaction.options.getSubcommand();
-        await this.handleModelCommand(interaction, subcommand);
-        break;
-      }
-
-      case "dnd": {
-        if (!this.preferences) {
-          await interaction.reply({ content: "Preferences not available.", ephemeral: true });
+        case "status": {
+          const skills = this.skills.listSkills();
+          const lines = skills.map(
+            (s) => `**${s.name}**: ${s.description} (${s.tools.length} tools)`
+          );
+          await interaction.editReply(
+            `**coda Status**\nSkills loaded: ${skills.length}\n${lines.join("\n") || "No skills loaded."}`
+          );
           break;
         }
-        const prefs = await this.preferences.getPreferences(interaction.user.id);
-        const newState = !prefs.dndEnabled;
-        await this.preferences.setDnd(interaction.user.id, newState);
-        await interaction.reply(
-          newState
-            ? "DND enabled — non-system alerts will be suppressed."
-            : "DND disabled — all alerts will be delivered."
-        );
-        break;
-      }
 
-      case "briefing": {
-        await interaction.deferReply();
-        const response = await this.orchestrator.handleMessage(
-          interaction.user.id,
-          "Give me my morning briefing",
-          "discord"
-        );
-        const chunks = chunkResponse(response.text, 1900);
-        await interaction.editReply(chunks[0] ?? "No briefing data available.");
-        for (let i = 1; i < chunks.length; i++) {
-          await interaction.followUp(chunks[i]!);
-        }
-        break;
-      }
-
-      case "quiet": {
-        if (!this.preferences) {
-          await interaction.reply({ content: "Preferences not available.", ephemeral: true });
+        case "help": {
+          const skills = this.skills.listSkills();
+          const lines = skills.map(
+            (s) => `- **${s.name}**: ${s.description}\n  Tools: ${s.tools.join(", ")}`
+          );
+          await interaction.editReply(
+            `**Available Skills**\n${lines.join("\n") || "No skills loaded."}`
+          );
           break;
         }
-        const start = interaction.options.getString("start");
-        const end = interaction.options.getString("end");
-        if (!start || !end) {
+
+        case "model": {
+          const subcommand = interaction.options.getSubcommand();
+          await this.handleModelCommand(interaction, subcommand);
+          break;
+        }
+
+        case "dnd": {
+          if (!this.preferences) {
+            await interaction.editReply("Preferences not available.");
+            break;
+          }
           const prefs = await this.preferences.getPreferences(interaction.user.id);
-          const qh = prefs.quietHoursStart && prefs.quietHoursEnd
-            ? `${prefs.quietHoursStart} – ${prefs.quietHoursEnd}`
-            : "not set";
-          await interaction.reply(`Current quiet hours: ${qh}`);
+          const newState = !prefs.dndEnabled;
+          await this.preferences.setDnd(interaction.user.id, newState);
+          await interaction.editReply(
+            newState
+              ? "DND enabled — non-system alerts will be suppressed."
+              : "DND disabled — all alerts will be delivered."
+          );
+          break;
+        }
+
+        case "briefing": {
+          const response = await this.orchestrator.handleMessage(
+            interaction.user.id,
+            "Give me my morning briefing",
+            "discord"
+          );
+          const chunks = chunkResponse(response.text, 1900);
+          await interaction.editReply(chunks[0] ?? "No briefing data available.");
+          for (let i = 1; i < chunks.length; i++) {
+            await interaction.followUp(chunks[i]!);
+          }
+          break;
+        }
+
+        case "quiet": {
+          if (!this.preferences) {
+            await interaction.editReply("Preferences not available.");
+            break;
+          }
+          const start = interaction.options.getString("start");
+          const end = interaction.options.getString("end");
+          if (!start || !end) {
+            const prefs = await this.preferences.getPreferences(interaction.user.id);
+            const qh = prefs.quietHoursStart && prefs.quietHoursEnd
+              ? `${prefs.quietHoursStart} – ${prefs.quietHoursEnd}`
+              : "not set";
+            await interaction.editReply(`Current quiet hours: ${qh}`);
+          } else {
+            await this.preferences.setQuietHours(interaction.user.id, start, end);
+            await interaction.editReply(`Quiet hours set: ${start} – ${end}`);
+          }
+          break;
+        }
+
+        case "subagents": {
+          if (!this.subagentManager) {
+            await interaction.editReply("Subagents are not available.");
+            break;
+          }
+          const subcommand = interaction.options.getSubcommand();
+          await this.handleSubagentsCommand(interaction, subcommand);
+          break;
+        }
+
+        case "mcp": {
+          if (!this.mcpManager) {
+            await interaction.editReply("No MCP servers configured.");
+            break;
+          }
+          const statuses = this.mcpManager.getStatus();
+          if (statuses.length === 0) {
+            await interaction.editReply("No MCP servers registered.");
+            break;
+          }
+
+          const lines = statuses.map((s) => {
+            const status = s.connected ? "🟢 Connected" : "⚪ Disconnected";
+            const transport = s.transportDetail;
+            const tools = s.connected ? `${s.toolCount} tools` : "—";
+            const idle =
+              s.connected && s.idleMinutes !== null ? `idle ${s.idleMinutes}m` : "";
+            return `**${s.name}** ${status}\n  ${transport} | ${tools} ${idle}\n  ${s.description}`;
+          });
+
+          await interaction.editReply(`**MCP Servers**\n\n${lines.join("\n\n")}`);
+          break;
+        }
+      }
+    } catch (err) {
+      this.logger.error({ error: err }, "Error handling Discord interaction");
+      try {
+        const msg = "An error occurred processing this command.";
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply(msg);
         } else {
-          await this.preferences.setQuietHours(interaction.user.id, start, end);
-          await interaction.reply(`Quiet hours set: ${start} – ${end}`);
+          await interaction.reply(msg);
         }
-        break;
-      }
-
-      case "subagents": {
-        if (!this.subagentManager) {
-          await interaction.reply({ content: "Subagents are not available.", ephemeral: true });
-          break;
-        }
-        const subcommand = interaction.options.getSubcommand();
-        await this.handleSubagentsCommand(interaction, subcommand);
-        break;
-      }
-
-      case "mcp": {
-        if (!this.mcpManager) {
-          await interaction.reply("No MCP servers configured.");
-          break;
-        }
-        const statuses = this.mcpManager.getStatus();
-        if (statuses.length === 0) {
-          await interaction.reply("No MCP servers registered.");
-          break;
-        }
-
-        const lines = statuses.map((s) => {
-          const status = s.connected ? "🟢 Connected" : "⚪ Disconnected";
-          const transport = s.transportDetail;
-          const tools = s.connected ? `${s.toolCount} tools` : "—";
-          const idle =
-            s.connected && s.idleMinutes !== null ? `idle ${s.idleMinutes}m` : "";
-          return `**${s.name}** ${status}\n  ${transport} | ${tools} ${idle}\n  ${s.description}`;
-        });
-
-        await interaction.reply(`**MCP Servers**\n\n${lines.join("\n\n")}`);
-        break;
-      }
+      } catch { /* ignore reply failure */ }
     }
   }
 
@@ -423,7 +444,7 @@ export class DiscordBot {
           (p) =>
             `**${p.name}**: ${p.models.join(", ")} (tools: ${p.capabilities.tools})`
         );
-        await interaction.reply(
+        await interaction.editReply(
           `**Available Providers**\n${lines.join("\n")}`
         );
         break;
@@ -433,7 +454,7 @@ export class DiscordBot {
         const provider = interaction.options.getString("provider");
         const model = interaction.options.getString("model");
         if (!provider || !model) {
-          await interaction.reply("Usage: /model set <provider> <model>");
+          await interaction.editReply("Usage: /model set <provider> <model>");
           return;
         }
         try {
@@ -442,11 +463,11 @@ export class DiscordBot {
             provider,
             model
           );
-          await interaction.reply(
+          await interaction.editReply(
             `Switched to **${provider}** / **${model}**`
           );
         } catch (err) {
-          await interaction.reply(
+          await interaction.editReply(
             `Error: ${err instanceof Error ? err.message : "Unknown error"}`
           );
         }
@@ -503,7 +524,7 @@ export class DiscordBot {
             statusText += `\nTotal estimated cost: $${cost.toFixed(4)}`;
           }
 
-          await interaction.reply(statusText);
+          await interaction.editReply(statusText);
         } else {
           // Legacy non-tier status
           const { provider, model } =
@@ -516,7 +537,7 @@ export class DiscordBot {
             usageText = usage.map(formatUsageLine).join("\n");
           }
 
-          await interaction.reply(
+          await interaction.editReply(
             `**Current Model**\nProvider: ${provider.name}\nModel: ${model}\nCapabilities: tools=${provider.capabilities.tools}, parallel=${provider.capabilities.parallelToolCalls}\n\n**Today's Usage**\n${usageText}${cost !== null ? `\n\nTotal estimated cost: $${cost.toFixed(4)}` : ""}`
           );
         }
@@ -529,12 +550,12 @@ export class DiscordBot {
         const model = interaction.options.getString("model");
 
         if (!tier || !provider || !model) {
-          await interaction.reply("Usage: /model tier <light|heavy> <provider> <model>");
+          await interaction.editReply("Usage: /model tier <light|heavy> <provider> <model>");
           return;
         }
 
         if (!this.providerManager.isTierEnabled()) {
-          await interaction.reply("Tiers are not enabled in the configuration.");
+          await interaction.editReply("Tiers are not enabled in the configuration.");
           return;
         }
 
@@ -545,11 +566,11 @@ export class DiscordBot {
             provider,
             model
           );
-          await interaction.reply(
+          await interaction.editReply(
             `Set ${tier} tier to **${provider}** / **${model}**`
           );
         } catch (err) {
-          await interaction.reply(
+          await interaction.editReply(
             `Error: ${err instanceof Error ? err.message : "Unknown error"}`
           );
         }
@@ -568,14 +589,14 @@ export class DiscordBot {
       case "list": {
         const runs = this.subagentManager!.listRuns(userId);
         if (runs.length === 0) {
-          await interaction.reply("No active sub-agent runs.");
+          await interaction.editReply("No active sub-agent runs.");
           return;
         }
         const lines = runs.map(
           (r) =>
             `\`${r.id.slice(0, 8)}\` | ${r.status} | ${r.mode} | ${r.task.slice(0, 60)}`
         );
-        await interaction.reply(
+        await interaction.editReply(
           `**Active Sub-agents**\n${lines.join("\n")}`
         );
         break;
@@ -584,18 +605,18 @@ export class DiscordBot {
       case "stop": {
         const runId = interaction.options.getString("run_id");
         if (!runId) {
-          await interaction.reply("Please provide a run ID.");
+          await interaction.editReply("Please provide a run ID.");
           return;
         }
         try {
           const stopped = await this.subagentManager!.stopRun(userId, runId);
-          await interaction.reply(
+          await interaction.editReply(
             stopped
               ? `Sub-agent \`${runId.slice(0, 8)}\` stopped.`
               : `No active run found with ID \`${runId.slice(0, 8)}\`.`
           );
         } catch (err) {
-          await interaction.reply(
+          await interaction.editReply(
             `Error: ${err instanceof Error ? err.message : "Unknown error"}`
           );
         }
@@ -605,18 +626,18 @@ export class DiscordBot {
       case "log": {
         const runId = interaction.options.getString("run_id");
         if (!runId) {
-          await interaction.reply("Please provide a run ID.");
+          await interaction.editReply("Please provide a run ID.");
           return;
         }
         const transcript = this.subagentManager!.getRunLog(userId, runId);
         if (!transcript) {
-          await interaction.reply(
+          await interaction.editReply(
             `No run found with ID \`${runId.slice(0, 8)}\` or access denied.`
           );
           return;
         }
         if (transcript.length === 0) {
-          await interaction.reply("No transcript entries yet.");
+          await interaction.editReply("No transcript entries yet.");
           return;
         }
         const entries = transcript
@@ -625,7 +646,7 @@ export class DiscordBot {
             (t) =>
               `[${t.role}${t.toolName ? ` (${t.toolName})` : ""}] ${t.content.slice(0, 200)}`
           );
-        await interaction.reply(
+        await interaction.editReply(
           `**Transcript** (last ${entries.length} entries)\n\`\`\`\n${entries.join("\n")}\n\`\`\``
         );
         break;
@@ -634,17 +655,17 @@ export class DiscordBot {
       case "info": {
         const runId = interaction.options.getString("run_id");
         if (!runId) {
-          await interaction.reply("Please provide a run ID.");
+          await interaction.editReply("Please provide a run ID.");
           return;
         }
         const info = this.subagentManager!.getRunInfo(userId, runId);
         if (!info) {
-          await interaction.reply(
+          await interaction.editReply(
             `No run found with ID \`${runId.slice(0, 8)}\` or access denied.`
           );
           return;
         }
-        await interaction.reply(
+        await interaction.editReply(
           `**Sub-agent Info**\nID: \`${info.id}\`\nStatus: ${info.status}\nMode: ${info.mode}\nTask: ${info.task.slice(0, 200)}\nModel: ${info.model ?? "default"}\nTokens: ${info.inputTokens} in / ${info.outputTokens} out\nTool calls: ${info.toolCallCount}\nCreated: ${info.createdAt.toISOString()}`
         );
         break;
@@ -654,11 +675,11 @@ export class DiscordBot {
         const runId = interaction.options.getString("run_id");
         const message = interaction.options.getString("message");
         if (!runId || !message) {
-          await interaction.reply("Please provide both a run ID and a message.");
+          await interaction.editReply("Please provide both a run ID and a message.");
           return;
         }
         const sent = this.subagentManager!.sendToRun(userId, runId, message);
-        await interaction.reply(
+        await interaction.editReply(
           sent
             ? `Message sent to sub-agent \`${runId.slice(0, 8)}\`.`
             : `Could not send message: run not found, not running, or access denied.`

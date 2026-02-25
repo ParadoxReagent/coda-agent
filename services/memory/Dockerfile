@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 # Install build dependencies for numpy/sentence-transformers
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -7,20 +7,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps with increased timeout and retries
+# Install Python deps
 COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout=1000 --retries=5 -r requirements.txt
+RUN pip install --no-cache-dir --timeout=1000 --retries=5 -r requirements.txt
 
-# Pre-download the embedding model at build time (cache the model downloads)
-RUN --mount=type=cache,target=/root/.cache/torch \
-    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+# Pre-download the embedding model at build time
+ENV SENTENCE_TRANSFORMERS_HOME=/app/models
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
+# --- Runtime ---
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy installed packages and entry-point binaries from builder (no build-essential in runtime)
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+
+# Copy pre-downloaded model
+COPY --from=builder /app/models /app/models
+ENV SENTENCE_TRANSFORMERS_HOME=/app/models
 
 # Copy application code
 COPY src/ ./src/
 
 # Run as non-root user
-RUN useradd --create-home --uid 1000 appuser
+RUN useradd --create-home --uid 1000 appuser && \
+    chown -R appuser:appuser /app/models
 USER appuser
 
 EXPOSE 8010

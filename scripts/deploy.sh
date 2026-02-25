@@ -251,6 +251,13 @@ echo -e "${BLUE}🚀 Building and starting containers...${NC}"
 echo -e "${YELLOW}This may take a few minutes on first run...${NC}"
 echo ""
 
+# Clean up old Docker resources to prevent disk exhaustion
+echo -e "${YELLOW}Cleaning up old Docker resources...${NC}"
+docker image prune -af
+docker builder prune -af
+echo -e "${GREEN}✓ Docker cleanup complete${NC}"
+echo ""
+
 # Build MCP server images and sandbox images (context7, browser-sandbox, etc.)
 # These are separate from the main app image and only need to be rebuilt when
 # their Dockerfiles change. Docker layer caching keeps this fast on repeat runs.
@@ -259,8 +266,8 @@ docker compose --profile mcp-build build
 echo -e "${GREEN}✓ MCP/sandbox images built${NC}"
 echo ""
 
-echo -e "${YELLOW}Building main app (no cache)...${NC}"
-docker compose build --no-cache coda-core
+echo -e "${YELLOW}Building main app...${NC}"
+docker compose build coda-core
 echo -e "${GREEN}✓ Main app built${NC}"
 echo ""
 
