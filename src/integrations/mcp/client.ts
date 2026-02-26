@@ -51,6 +51,12 @@ export class McpClientWrapper {
 
   /** Connect to MCP server with timeout. */
   async connect(): Promise<void> {
+    // Recreate client to support reconnection after a previous disconnect/close
+    this.client = new Client(
+      { name: "coda-agent", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
     const abortController = new AbortController();
     const timeout = setTimeout(() => {
       abortController.abort();

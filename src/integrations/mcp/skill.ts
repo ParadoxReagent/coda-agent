@@ -63,7 +63,12 @@ export class McpServerSkill implements Skill {
         throw new Error(`MCP client not found for server: ${this.serverName}`);
       }
 
-      const result = await client.callTool(mcpToolName, toolInput);
+      // Inject tool_defaults for any parameters the LLM omitted
+      const mergedInput = this.config.tool_defaults
+        ? { ...this.config.tool_defaults, ...toolInput }
+        : toolInput;
+
+      const result = await client.callTool(mcpToolName, mergedInput);
 
       // Truncate response if needed
       const { content, truncated } = truncateMcpResponse(

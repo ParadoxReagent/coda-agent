@@ -447,6 +447,31 @@ export const taskState = pgTable(
   ]
 );
 
+/** Self-improvement execution run records. */
+export const selfImprovementRuns = pgTable(
+  "self_improvement_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    proposalId: uuid("proposal_id").references(() => improvementProposals.id),
+    outcome: varchar("outcome", { length: 20 }).notNull(),
+    branchName: varchar("branch_name", { length: 255 }),
+    prUrl: varchar("pr_url", { length: 500 }),
+    targetFiles: jsonb("target_files").default([]),
+    steps: jsonb("steps").default([]),
+    blastRadius: jsonb("blast_radius").default({}),
+    narrative: text("narrative"),
+    error: text("error"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_sir_proposal").on(table.proposalId),
+    index("idx_sir_outcome").on(table.outcome),
+    index("idx_sir_created").on(table.createdAt),
+  ]
+);
+
 /** Semantic memory store with vector embeddings for similarity search. */
 export const memories = pgTable(
   "memories",

@@ -1,0 +1,5 @@
+description: "Read-only code analyst: maps files to capabilities and traces import chains for blast radius analysis"
+enabled: true
+default_model: null
+token_budget: 50000
+max_tool_calls: 30

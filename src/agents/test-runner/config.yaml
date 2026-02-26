@@ -1,0 +1,5 @@
+description: "Methodical QA validator: runs compile, test, Docker build, and shadow container health checks"
+enabled: true
+default_model: null
+token_budget: 50000
+max_tool_calls: 40

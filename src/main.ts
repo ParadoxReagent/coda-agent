@@ -44,6 +44,7 @@ import { DoctorSkill } from "./skills/doctor/skill.js";
 import { SubagentManager } from "./core/subagent-manager.js";
 import { TierClassifier } from "./core/tier-classifier.js";
 import { DockerExecutorSkill } from "./skills/docker-executor/skill.js";
+import { DockerSandboxSkill } from "./skills/docker-sandbox/skill.js";
 import { AuditService } from "./core/audit.js";
 import { AuditSkill } from "./skills/audit/skill.js";
 import { RoutingDecisionLogger } from "./core/routing-logger.js";
@@ -54,6 +55,7 @@ import { SelfAssessmentService } from "./core/self-assessment.js";
 import { PromptManager } from "./core/prompt-manager.js";
 import { LearnedTierClassifier } from "./core/learned-classifier.js";
 import { SelfImprovementSkill } from "./skills/self-improvement/skill.js";
+import { SelfImprovementExecutorSkill } from "./skills/self-improvement-executor/skill.js";
 import { TaskExecutionSkill } from "./skills/tasks/skill.js";
 import { CritiqueService } from "./core/critique-service.js";
 import { FewShotService } from "./core/few-shot-service.js";
@@ -76,6 +78,7 @@ function getSkillConfig(skillName: string, config: AppConfig): Record<string, un
     weather: config.weather,
     n8n: config.n8n,
     "self-improvement": config.self_improvement,
+    "self-improvement-executor": config.self_improvement,
     tasks: config.tasks,
   };
   return (sectionMap[skillName] as Record<string, unknown>) ?? {};
@@ -318,6 +321,16 @@ async function main() {
     logger.info("Docker executor disabled (execution.enabled: false)");
   }
 
+  // 7d. Docker Sandbox Skill (for self-improvement executor validation)
+  if (config.self_improvement?.executor_enabled) {
+    try {
+      skillRegistry.register(new DockerSandboxSkill());
+      logger.info("Docker sandbox skill registered");
+    } catch (err) {
+      logger.warn({ error: err }, "Docker sandbox skill not registered");
+    }
+  }
+
   // 7d. Browser Automation Skill (Playwright MCP in ephemeral Docker sandbox)
   if (config.browser?.enabled) {
     try {
@@ -415,6 +428,32 @@ async function main() {
     skillRegistry.register(tasksSkill);
   }
 
+  // Register self-improvement executor skill (Phase 6)
+  // Must be registered before startupAll; subagentManager wired below after it's created.
+  let selfImprovementExecutorSkill: SelfImprovementExecutorSkill | undefined;
+  if (config.self_improvement?.executor_enabled) {
+    const { getAgentLoader } = await import("./core/agent-loader.js");
+    selfImprovementExecutorSkill = new SelfImprovementExecutorSkill({
+      executor_enabled: config.self_improvement.executor_enabled,
+      executor_require_approval: config.self_improvement.executor_require_approval,
+      executor_cron: config.self_improvement.executor_cron,
+      executor_max_files: config.self_improvement.executor_max_files,
+      executor_blast_radius_limit: config.self_improvement.executor_blast_radius_limit,
+      executor_allowed_paths: config.self_improvement.executor_allowed_paths,
+      executor_forbidden_paths: config.self_improvement.executor_forbidden_paths,
+      executor_auto_merge: false,
+      executor_shadow_port: config.self_improvement.executor_shadow_port,
+      executor_max_run_duration_minutes: config.self_improvement.executor_max_run_duration_minutes,
+      executor_webhook_name: config.self_improvement.executor_webhook_name,
+      executor_github_owner: config.self_improvement.executor_github_owner,
+      executor_github_repo: config.self_improvement.executor_github_repo,
+    });
+    selfImprovementExecutorSkill.setAgentLoader(getAgentLoader());
+    selfImprovementExecutorSkill.setSkillRegistry(skillRegistry);
+    skillRegistry.register(selfImprovementExecutorSkill);
+    logger.info("Self-improvement executor skill registered");
+  }
+
   // Register self-improvement skill (4.2 + 4.3)
   if (config.self_improvement?.enabled !== false) {
     const selfImprovementSkill = new SelfImprovementSkill({
@@ -504,6 +543,11 @@ async function main() {
   );
   subagentSkill.setManager(subagentManager);
   subagentSkill.setSpecialistConfig(config.specialists);
+
+  // Wire subagentManager into self-improvement executor (after it's created)
+  if (selfImprovementExecutorSkill) {
+    selfImprovementExecutorSkill.setSubagentManager(subagentManager);
+  }
 
   // Helper: build Opus LLM client (for privileged skills like self-improvement)
   const opusModel = config.self_improvement?.opus_model;

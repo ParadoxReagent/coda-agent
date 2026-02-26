@@ -92,6 +92,45 @@ See [docs/mcp-integration.md](docs/mcp-integration.md) for complete documentatio
 - Security best practices
 - Troubleshooting guide
 
+### GitHub MCP (Self-Improvement Executor)
+
+The GitHub MCP server (`@modelcontextprotocol/server-github`) is used exclusively by the self-improvement executor to create branches and open pull requests when an improvement cycle passes all tests.
+
+**Required tools (allowlisted):**
+- `get_file_contents` — read current file contents from the repo
+- `create_branch` — create a fix branch (`agent/self-improvement/...`)
+- `create_or_update_file` — push patched files to the branch
+- `create_pull_request` — open a PR for human review
+- `list_commits` — verify branch state
+- `search_code` — used by code-archaeologist for blast radius analysis
+
+**Setup:**
+
+1. Create a fine-grained GitHub PAT at https://github.com/settings/tokens?type=beta:
+   - **Repository access**: Select target repo only (`ParadoxReagent/coda-agent`)
+   - **Permissions**: Contents (Read & Write), Pull requests (Read & Write), Metadata (Read)
+
+2. Add to `.env`:
+   ```
+   GITHUB_TOKEN=github_pat_...
+   ```
+
+3. Enable in `config.yaml`:
+   ```yaml
+   mcp:
+     servers:
+       github:
+         enabled: true   # (change from false)
+   ```
+
+4. Enable the executor:
+   ```yaml
+   self_improvement:
+     executor_enabled: true
+   ```
+
+**Security:** The GitHub MCP server is started `lazy` — only connects on first use. Auto-merge is hardcoded to `false` regardless of configuration.
+
 ## n8n
 
 Ingests events from [n8n](https://n8n.io) automation workflows. Accepts any event type — emails, GitHub PRs, server alerts, etc.

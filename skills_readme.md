@@ -234,6 +234,74 @@ When the LLM activates the skill via `skill_activate`, it receives the `docker_i
 
 The container has access to files in the mounted working directory at `/workspace`. Commands can write output files to `/workspace/output/` — these files are automatically collected and returned to the user as attachments.
 
+### Docker Sandbox
+
+Sandboxed Docker operations for the self-improvement executor pipeline. Unlike `docker-executor` (for user code execution), this skill manages `agent-sandbox-*` containers used to validate code changes in isolation before submitting PRs.
+
+| Tool | Tier | Description |
+|------|------|-------------|
+| `docker_sandbox_build` | 3 | Build a Docker image (tag must start `agent-sandbox-`) |
+| `docker_sandbox_run` | 3 | Run a named container in detached mode |
+| `docker_sandbox_logs` | 0 | Get container logs |
+| `docker_sandbox_stop` | 2 | Stop a running container |
+| `docker_sandbox_remove` | 2 | Remove a container |
+| `docker_sandbox_healthcheck` | 0 | HTTP GET localhost health check |
+
+**Security constraints:**
+- Image tag and container name must start with `agent-sandbox-` (prevents targeting production containers)
+- Build context path must be within the agent's working directory (prevents path traversal)
+- Healthcheck limited to `localhost` / `127.0.0.1` (prevents SSRF)
+- No shell injection: uses `execFile` (not `exec`) for all Docker commands
+- Enabled only when `self_improvement.executor_enabled: true`
+
+### Self-Improvement Executor
+
+Closes the detect→fix→test→PR loop for self-improvement proposals. Orchestrates a 9-step pipeline using specialist subagents and the GitHub MCP integration.
+
+| Tool | Tier | Description |
+|------|------|-------------|
+| `self_improvement_run` | 3 | Manually trigger an execution cycle |
+| `self_improvement_status` | 0 | Status of current/last run |
+| `self_improvement_history` | 0 | Past run results from DB |
+
+**Pipeline (when `self_improvement_run` is called):**
+1. Acquire Redis lock (prevent concurrent runs)
+2. Select highest-priority approved proposal
+3. Blast radius analysis (code-archaeologist subagent)
+4. Generate code fix (code-surgeon subagent)
+5. Create branch + push files (GitHub MCP)
+6. Build, test, shadow container validation (test-runner subagent)
+7. Create PR on PASS (GitHub MCP)
+8. Morning narrative + webhook (improvement-reporter subagent)
+9. Update DB + release lock
+
+**Specialist agents used:**
+- `code-archaeologist` — read-only blast radius analysis
+- `code-surgeon` — minimum viable TypeScript fix generator (Sonnet)
+- `test-runner` — compile + test + Docker build + smoke tests
+- `improvement-reporter` — PR body + morning briefing (Sonnet)
+
+**Safety:**
+- `executor_forbidden_paths`: `src/core`, `src/db/migrations`, `src/main.ts` always protected
+- `executor_blast_radius_limit`: abort if too many files affected (default 5)
+- Auto-merge hardcoded to `false` — humans must review every PR
+- `executor_enabled: false` by default — must be opted into after configuring `GITHUB_TOKEN`
+
+**Scheduling:** Monday 2 AM (`executor_cron: "0 2 * * 1"`) — picks up proposals from Sunday 3 AM reflection.
+
+**Configuration** (in `config.yaml` under `self_improvement:`):
+
+```yaml
+self_improvement:
+  executor_enabled: false         # Enable after setting GITHUB_TOKEN
+  executor_require_approval: true # Only "approved" proposals (vs. also "pending")
+  executor_cron: "0 2 * * 1"     # Monday 2 AM
+  executor_max_files: 3           # Max files per fix
+  executor_blast_radius_limit: 5  # Abort if >5 files affected
+  executor_shadow_port: 3099      # Shadow container health check port
+  executor_webhook_name: ""       # n8n webhook name for morning reports
+```
+
 ### Browser Automation
 
 Secure browser automation via Playwright's direct Node.js API in ephemeral Docker containers. Unlike Firecrawl (read-only scraping), the browser skill can log into portals, fill forms, click buttons, and interact with single-page apps. The direct API removes the fragile MCP protocol layer while keeping the same security model.

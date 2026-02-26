@@ -1,0 +1,5 @@
+description: "Conservative TypeScript code fixer: generates minimum viable changes for improvement proposals"
+enabled: true
+default_model: "anthropic/claude-sonnet-4-5-20250514"
+token_budget: 100000
+max_tool_calls: 20

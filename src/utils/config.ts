@@ -307,6 +307,7 @@ const McpServerConfigSchema = z.object({
   tool_timeout_ms: z.number().default(60000),
   tool_allowlist: z.array(z.string()).optional(),
   tool_blocklist: z.array(z.string()).default([]),
+  tool_defaults: z.record(z.string(), z.unknown()).optional(),
   requires_confirmation: z.array(z.string()).default([]),
   sensitive_tools: z.array(z.string()).default([]),
   description: z.string().optional(),
@@ -352,6 +353,20 @@ const SelfImprovementConfigSchema = z.object({
   few_shot_harvest_cron: z.string().default("0 4 1 * *"), // 1st of month 4 AM
   few_shot_min_score: z.number().default(4),
   few_shot_min_tool_calls: z.number().default(2),
+  // Phase 6: Self-Improvement Executor
+  executor_enabled: z.boolean().default(false),
+  executor_require_approval: z.boolean().default(true),
+  executor_cron: z.string().default("0 2 * * 1"), // Monday 2 AM
+  executor_max_files: z.number().default(3),
+  executor_blast_radius_limit: z.number().default(5),
+  executor_allowed_paths: z.array(z.string()).default(["src/skills", "src/integrations", "src/utils"]),
+  executor_forbidden_paths: z.array(z.string()).default(["src/core", "src/db/migrations", "src/main.ts"]),
+  executor_auto_merge: z.boolean().default(false),
+  executor_shadow_port: z.number().default(3099),
+  executor_max_run_duration_minutes: z.number().default(45),
+  executor_webhook_name: z.string().optional(),
+  executor_github_owner: z.string().default(""),
+  executor_github_repo: z.string().default(""),
 });
 
 const TasksConfigSchema = z.object({
@@ -435,10 +450,39 @@ export function loadConfig(configPath?: string): AppConfig {
     rawConfig = yaml.load(fileContent) as Record<string, unknown>;
   }
 
+  // Substitute ${VAR_NAME} placeholders with actual env var values
+  substituteEnvVars(rawConfig);
+
   // Apply environment variable overrides
   applyEnvOverrides(rawConfig);
 
   return AppConfigSchema.parse(rawConfig);
+}
+
+/**
+ * Recursively walk the config object and replace any string value containing
+ * ${VAR_NAME} with the corresponding environment variable.  Unknown variables
+ * are left as empty string so downstream validation can catch them.
+ */
+function substituteEnvVars(obj: unknown): void {
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      if (typeof obj[i] === "string") {
+        obj[i] = (obj[i] as string).replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name] ?? "");
+      } else {
+        substituteEnvVars(obj[i]);
+      }
+    }
+  } else if (obj !== null && typeof obj === "object") {
+    const record = obj as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      if (typeof record[key] === "string") {
+        record[key] = (record[key] as string).replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name] ?? "");
+      } else {
+        substituteEnvVars(record[key]);
+      }
+    }
+  }
 }
 
 function applyEnvOverrides(config: Record<string, unknown>): void {

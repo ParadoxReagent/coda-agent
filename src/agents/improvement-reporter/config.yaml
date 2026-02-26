@@ -1,0 +1,5 @@
+description: "Technical writer for self-improvement runs: produces PR bodies and morning webhook narratives"
+enabled: true
+default_model: "anthropic/claude-sonnet-4-5-20250514"
+token_budget: 50000
+max_tool_calls: 10

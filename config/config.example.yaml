@@ -1,23 +1,18 @@
 # ── Required ──────────────────────────────────────
 llm:
-  default_provider: "anthropic"
-  default_model: "claude-sonnet-4-5-20250514"
-  providers:
-    anthropic:
-      type: "anthropic"
-      api_key: ""  # or set ANTHROPIC_API_KEY env var
-      models:
-        - "claude-sonnet-4-5-20250514"
-        - "claude-haiku-3-5-20241022"
+  default_provider: "openrouter"
+  default_model: "google/gemini-3-flash-preview"
+  providers: {}
+  
   # Tier routing — use a cheaper model for simple requests, expensive for complex ones
   tiers:
-    enabled: false
+    enabled: true
     light:
-      provider: "anthropic"
-      model: "claude-haiku-3-5-20241022"
+      provider: "openrouter"
+      model: "google/gemini-3-flash-preview"
     heavy:
-      provider: "anthropic"
-      model: "claude-sonnet-4-5-20250514"
+      provider: "openrouter"
+      model: "anthropic/claude-sonnet-4.6"
 
 discord:
   bot_token: ""       # or DISCORD_BOT_TOKEN
@@ -186,6 +181,27 @@ weather: {}         # Free NWS API, no key needed
 #   few_shot_harvest_cron: "0 4 1 * *" # 1st of month 4 AM
 #   few_shot_min_score: 4              # Min self-assessment score to qualify for harvest (0-5)
 #   few_shot_min_tool_calls: 2         # Min tool calls in interaction to qualify
+#   # ── Self-Improvement Executor (Phase 6) ──
+#   # Closes the loop: takes approved proposals and generates + tests code fixes, then opens PRs.
+#   executor_enabled: false            # Disabled by default — enable when ready
+#   executor_require_approval: true    # true: only "approved" proposals; false: also "pending"
+#   executor_cron: "0 2 * * 1"        # Monday 2 AM (day after Sunday reflection)
+#   executor_max_files: 3              # Max files a single fix may touch
+#   executor_blast_radius_limit: 5    # Abort if blast radius exceeds this file count
+#   executor_allowed_paths:           # Only these path prefixes may be modified
+#     - "src/skills"
+#     - "src/integrations"
+#     - "src/utils"
+#   executor_forbidden_paths:         # These paths are never modified (defense in depth)
+#     - "src/core"
+#     - "src/db/migrations"
+#     - "src/main.ts"
+#   executor_auto_merge: false        # Always false — PRs must be reviewed by humans
+#   executor_shadow_port: 3099        # Port for shadow container health checks
+#   executor_max_run_duration_minutes: 45  # Kill cycle if it exceeds this
+#   executor_webhook_name: ""         # n8n webhook name for morning reports (optional)
+#   executor_github_owner: "your-org" # GitHub org/user owning the repo (required for PRs)
+#   executor_github_repo: "your-repo" # GitHub repo name (required for PRs)
 
 # ── Specialist Agents (Phase 5.2) ────────────────
 # Per-agent overrides for directory-based specialists (home, research, lab, planner, ...).
@@ -343,9 +359,34 @@ alerts:
 #       tool_timeout_ms: 60000   # Per-tool execution timeout
 #       max_response_size: 100000  # Max response size in bytes (100KB)
 #
+#     # GitHub MCP — used by SelfImprovementExecutorSkill to create branches and PRs
+#     # Requires: GITHUB_TOKEN env var (fine-grained PAT with Contents + Pull Requests write)
+#     github:
+#       enabled: true
+#       transport:
+#         type: stdio
+#         command: docker
+#         args: ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_HOST", "ghcr.io/github/github-mcp-server"]
+#         env:
+#           GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
+#           GITHUB_HOST: "https://github.com"  # Change for GHES/ghe.com deployments
+#       tool_defaults:           # Default param values injected into matching tool schemas
+#         owner: "your-org"      # Eliminates need to tell the LLM which repo to target
+#         repo: "your-repo"
+#       tool_allowlist:
+#         - get_file_contents
+#         - create_branch
+#         - create_or_update_file
+#         - create_pull_request
+#         - list_commits
+#         - search_code
+#       startup_mode: lazy
+#       tool_timeout_ms: 30000
+#       description: "GitHub API access for self-improvement executor (branch/PR creation)"
+#
 #     # Example 3: Remote MCP service via HTTP
 #     # For production deployments, microservices, or external APIs
-#     github:
+#     github_http_example:
 #       enabled: false
 #       transport:
 #         type: http

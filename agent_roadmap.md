@@ -398,6 +398,54 @@ Monthly Opus harvests best interactions from audit log into `solution_patterns` 
 | 22 | Skill registry | 🔲 Todo | S-M | Ecosystem growth |
 | 23 | Gap detection (5.4) | ✅ Done | L | Monthly capability analysis |
 | 24 | Few-shot library (5.7) | ✅ Done | S-M | Pattern-based context |
+| 25 | Self-improvement executor (6.1) | ✅ Done | L | Automated code fix pipeline |
+
+---
+
+## Phase 6 — Self-Improvement Execution Loop
+
+*Theme: Closing the detect→fix→test→PR loop. The agent can now act on its own improvement proposals.*
+
+### ✅ 6.1 Self-Improvement Executor
+
+Automated pipeline that takes approved improvement proposals and generates code fixes, validates them in a shadow container, and opens PRs for human review.
+
+**Architecture:**
+- `detect` (existing) → `generate fix` → `test in sandbox` → `submit PR` → `report results`
+- Scheduled: Monday 2 AM (day after Sunday reflection generates proposals)
+- Redis mutex lock prevents concurrent runs
+- Auto-merge hardcoded to `false` — human review always required
+
+**Implemented:**
+
+*Specialist Agents (`src/agents/`):*
+- `code-archaeologist/` — read-only blast radius analysis (Haiku-tier)
+- `code-surgeon/` — minimum viable code fix generator (Sonnet)
+- `test-runner/` — build/test/Docker/smoke pipeline (Haiku-tier)
+- `improvement-reporter/` — PR body + morning webhook narrative (Sonnet)
+
+*Skills (`src/skills/`):*
+- `docker-sandbox/skill.ts` — 6 sandboxed Docker tools with `agent-sandbox-` prefix enforcement, path validation, no shell injection
+- `self-improvement-executor/skill.ts` — orchestrates the full cycle via subagent delegation
+- `self-improvement-executor/guardrails.ts` — path allow/block lists, blast radius gate
+- `self-improvement-executor/smoke-tests.ts` — HTTP liveness test suite (startup, service-status, basic-liveness)
+
+*Database:*
+- `self_improvement_runs` table — tracks each run with outcome, branch, PR URL, steps, blast radius
+
+*Integrations:*
+- GitHub MCP server (`@modelcontextprotocol/server-github`) — create branches, push files, open PRs
+- Requires `GITHUB_TOKEN` fine-grained PAT (Contents + Pull Requests read/write)
+
+*Safety Mitigations:*
+- `executor_forbidden_paths`: `src/core`, `src/db/migrations`, `src/main.ts` — never auto-patched
+- `executor_allowed_paths`: only `src/skills`, `src/integrations`, `src/utils`
+- Blast radius gate: abort if blast radius > `executor_blast_radius_limit` (default 5 files)
+- `finally` block: force-removes all `agent-sandbox-*` containers on any failure
+- Baseline test comparison: 35 pre-existing failures, any new failures = FAIL
+- `executor_enabled: false` by default — opt-in after GitHub PAT is configured
+
+**Effort: L** (implementation + testing)
 
 ---
 

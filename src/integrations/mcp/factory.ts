@@ -44,9 +44,26 @@ export async function createMcpSkills(
         logger.info({ server: serverName }, "Connecting to MCP server (eager mode)");
         tools = await manager.ensureConnected(serverName);
       } else {
-        // Lazy mode - connect on first use
-        logger.info({ server: serverName }, "MCP server registered (lazy mode, will connect on first use)");
-        tools = []; // No tools yet, will be discovered on first connection
+        // Lazy mode - pre-discover tools so the orchestrator knows what's available,
+        // then disconnect immediately. Will reconnect on first actual tool call.
+        logger.info({ server: serverName }, "Pre-discovering tools for lazy MCP server");
+        try {
+          tools = await manager.ensureConnected(serverName);
+          await manager.getClient(serverName)?.disconnect();
+          logger.info(
+            { server: serverName, toolCount: tools.length },
+            "MCP server tools discovered, disconnected until first use (lazy mode)"
+          );
+        } catch (err) {
+          logger.warn(
+            {
+              server: serverName,
+              error: err instanceof Error ? err.message : String(err),
+            },
+            "Failed to pre-discover tools for lazy MCP server, tools will be unknown until first use"
+          );
+          tools = [];
+        }
       }
 
       // Create skill
