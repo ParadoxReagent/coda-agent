@@ -98,7 +98,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
       vi.mocked(mockClientInstance.listTools).mockResolvedValue({ tools: mockTools });
 
       const tools = await client.listTools();
@@ -113,7 +113,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
       vi.mocked(mockClientInstance.callTool).mockResolvedValue({
         content: [{ type: "text", text: "Tool result" }],
         isError: false,
@@ -130,7 +130,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
       vi.mocked(mockClientInstance.callTool).mockResolvedValue({
         content: [
           { type: "text", text: "First block" },
@@ -149,7 +149,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
       vi.mocked(mockClientInstance.callTool).mockResolvedValue({
         content: [{ type: "image", data: "base64data", mimeType: "image/png" }],
         isError: false,
@@ -165,7 +165,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
       vi.mocked(mockClientInstance.callTool).mockResolvedValue({
         content: [
           {
@@ -186,7 +186,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
       vi.mocked(mockClientInstance.callTool).mockResolvedValue({
         content: [{ type: "text", text: "Error occurred" }],
         isError: true,
@@ -204,7 +204,7 @@ describe("McpClientWrapper", () => {
       await client.connect();
 
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const mockClientInstance = vi.mocked(Client).mock.results[0].value;
+      const mockClientInstance = vi.mocked(Client).mock.results[1].value;
 
       await client.disconnect();
 

@@ -116,7 +116,11 @@ describe("factory", () => {
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         { server: "filesystem" },
-        "MCP server registered (lazy mode, will connect on first use)"
+        "Pre-discovering tools for lazy MCP server"
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { server: "filesystem", toolCount: 1 },
+        "MCP server tools discovered, disconnected until first use (lazy mode)"
       );
     });
 
