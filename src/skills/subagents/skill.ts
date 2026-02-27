@@ -7,7 +7,7 @@ import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { SubagentManager } from "../../core/subagent-manager.js";
 import { getCurrentContext } from "../../core/correlation.js";
-import { resolvePreset, getPresetNames } from "../../core/agent-loader.js";
+import { getAgentLoader } from "../../core/agent-loader.js";
 import type { SpecialistsConfig } from "../../utils/config.js";
 import { createEnvelope } from "../../core/subagent-envelope.js";
 import type { SubagentTaskType } from "../../core/subagent-envelope.js";
@@ -326,11 +326,11 @@ export class SubagentSkill implements Skill {
 
     const envelope = taskType
       ? createEnvelope(crypto.randomUUID(), taskType, task, {
-          requesterId: userId,
-          requesterChannel: channel,
-          priority,
-          tags,
-        })
+        requesterId: userId,
+        requesterChannel: channel,
+        priority,
+        tags,
+      })
       : undefined;
 
     try {
@@ -361,11 +361,11 @@ export class SubagentSkill implements Skill {
 
     const envelope = taskType
       ? createEnvelope(crypto.randomUUID(), taskType, task, {
-          requesterId: userId,
-          requesterChannel: channel,
-          priority,
-          tags,
-        })
+        requesterId: userId,
+        requesterChannel: channel,
+        priority,
+        tags,
+      })
       : undefined;
 
     try {
@@ -497,9 +497,9 @@ export class SubagentSkill implements Skill {
 
     let preset;
     try {
-      preset = resolvePreset(specialistName, this.specialistConfig);
+      preset = getAgentLoader().resolveAgent(specialistName, this.specialistConfig);
     } catch (err) {
-      const available = getPresetNames().join(", ");
+      const available = getAgentLoader().getAgentNames().join(", ");
       return `Unknown specialist '${specialistName}'. Available: ${available}`;
     }
 
@@ -527,10 +527,10 @@ export class SubagentSkill implements Skill {
   }
 
   private handleSpecialistList(): string {
-    const names = getPresetNames();
+    const names = getAgentLoader().getAgentNames();
     const presets = names.map(name => {
       try {
-        const preset = resolvePreset(name, this.specialistConfig);
+        const preset = getAgentLoader().resolveAgent(name, this.specialistConfig);
         return { name: preset.name, description: preset.description, tools: preset.allowedTools };
       } catch {
         return { name, description: "unavailable", tools: [] };
