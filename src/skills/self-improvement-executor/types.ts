@@ -56,7 +56,6 @@ export interface ExecutorConfig {
   executor_auto_merge: boolean;
   executor_shadow_port: number;
   executor_max_run_duration_minutes: number;
-  executor_webhook_name?: string;
   executor_github_owner: string;
   executor_github_repo: string;
 }

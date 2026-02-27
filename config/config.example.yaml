@@ -199,7 +199,6 @@ weather: {}         # Free NWS API, no key needed
 #   executor_auto_merge: false        # Always false — PRs must be reviewed by humans
 #   executor_shadow_port: 3099        # Port for shadow container health checks
 #   executor_max_run_duration_minutes: 45  # Kill cycle if it exceeds this
-#   executor_webhook_name: ""         # n8n webhook name for morning reports (optional)
 #   executor_github_owner: "your-org" # GitHub org/user owning the repo (required for PRs)
 #   executor_github_repo: "your-repo" # GitHub repo name (required for PRs)
 

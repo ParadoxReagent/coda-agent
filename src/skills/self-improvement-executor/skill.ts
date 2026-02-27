@@ -25,6 +25,7 @@ import type { Skill, SkillToolDefinition } from "../base.js";
 import type { SkillContext } from "../context.js";
 import type { Database } from "../../db/index.js";
 import type { Logger } from "../../utils/logger.js";
+import type { MessageSender } from "../../core/message-sender.js";
 import type { SubagentManager } from "../../core/subagent-manager.js";
 import type { SkillRegistry } from "../registry.js";
 import type { AgentLoader } from "../../core/agent-loader.js";
@@ -57,6 +58,7 @@ export class SelfImprovementExecutorSkill implements Skill {
 
   private db?: Database;
   private logger?: Logger;
+  private messageSender?: MessageSender;
   private subagentManager?: SubagentManager;
   private agentLoader?: AgentLoader;
   private skillRegistry?: SkillRegistry;
@@ -80,7 +82,6 @@ export class SelfImprovementExecutorSkill implements Skill {
       executor_auto_merge: false, // Always false (defense in depth)
       executor_shadow_port: config?.executor_shadow_port ?? 3099,
       executor_max_run_duration_minutes: config?.executor_max_run_duration_minutes ?? 45,
-      executor_webhook_name: config?.executor_webhook_name,
       executor_github_owner: config?.executor_github_owner ?? "",
       executor_github_repo: config?.executor_github_repo ?? "",
     };
@@ -160,6 +161,7 @@ export class SelfImprovementExecutorSkill implements Skill {
     this.db = ctx.db;
     this.logger = ctx.logger;
     this.redis = ctx.redis;
+    this.messageSender = ctx.messageSender;
 
     if (!this.config.executor_enabled) {
       this.logger?.info("Self-improvement executor disabled (executor_enabled: false)");
@@ -949,7 +951,6 @@ export class SelfImprovementExecutorSkill implements Skill {
     if (!this.subagentManager) return undefined;
 
     const agentDef = this.agentLoader?.getAgent("improvement-reporter");
-    const webhookTools = this.config.executor_webhook_name ? ["n8n_trigger_webhook"] : [];
 
     const task = [
       `Write a morning narrative for a self-improvement run with the following results:`,
@@ -966,24 +967,28 @@ export class SelfImprovementExecutorSkill implements Skill {
         ? `A PR was successfully created. Mention the PR URL in the narrative.`
         : `No PR was created. Explain why briefly.`,
       ``,
-      this.config.executor_webhook_name
-        ? `After writing the narrative, send it via n8n_trigger_webhook with webhook name "${this.config.executor_webhook_name}".`
-        : `Return the narrative text only.`,
+      `Return the narrative text only.`,
     ].join("\n");
 
     try {
-      const result = await this.subagentManager.delegateSync(
+      const narrative = await this.subagentManager.delegateSync(
         "system",
         "system",
         task,
         {
-          toolsNeeded: ["memory_search", ...webhookTools],
+          toolsNeeded: ["memory_search"],
           workerName: "improvement-reporter",
           workerInstructions: agentDef?.systemPrompt,
           tokenBudget: agentDef?.tokenBudget ?? 50000,
         }
       );
-      return result.slice(0, 1000);
+      const text = narrative.slice(0, 1000);
+      try {
+        await this.messageSender?.broadcast(text, "self-improvement-executor");
+      } catch {
+        // Best-effort delivery — don't let notification failures abort the run
+      }
+      return text;
     } catch {
       return undefined;
     }

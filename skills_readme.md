@@ -299,7 +299,6 @@ self_improvement:
   executor_max_files: 3           # Max files per fix
   executor_blast_radius_limit: 5  # Abort if >5 files affected
   executor_shadow_port: 3099      # Shadow container health check port
-  executor_webhook_name: ""       # n8n webhook name for morning reports
 ```
 
 ### Browser Automation

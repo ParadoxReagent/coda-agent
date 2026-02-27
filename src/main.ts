@@ -444,7 +444,6 @@ async function main() {
       executor_auto_merge: false,
       executor_shadow_port: config.self_improvement.executor_shadow_port,
       executor_max_run_duration_minutes: config.self_improvement.executor_max_run_duration_minutes,
-      executor_webhook_name: config.self_improvement.executor_webhook_name,
       executor_github_owner: config.self_improvement.executor_github_owner,
       executor_github_repo: config.self_improvement.executor_github_repo,
     });

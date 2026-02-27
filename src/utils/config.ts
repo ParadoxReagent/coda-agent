@@ -364,7 +364,6 @@ const SelfImprovementConfigSchema = z.object({
   executor_auto_merge: z.boolean().default(false),
   executor_shadow_port: z.number().default(3099),
   executor_max_run_duration_minutes: z.number().default(45),
-  executor_webhook_name: z.string().optional(),
   executor_github_owner: z.string().default(""),
   executor_github_repo: z.string().default(""),
 });
