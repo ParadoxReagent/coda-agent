@@ -58,6 +58,7 @@ export class InProcessEventBus implements EventBus {
   ): void {
     // Convert glob-like pattern to regex: "alert.*" → /^alert\..*$/
     const regexStr = pattern
+      .replace(/\\/g, "\\\\")
       .replace(/\./g, "\\.")
       .replace(/\*/g, ".*");
     const regex = new RegExp(`^${regexStr}$`);
