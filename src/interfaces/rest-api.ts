@@ -3,6 +3,7 @@ import type { Logger } from "../utils/logger.js";
 import type { SkillHealthTracker } from "../core/skill-health.js";
 import type { ProviderManager } from "../core/llm/manager.js";
 import type Redis from "ioredis";
+import rateLimit from "@fastify/rate-limit";
 
 interface HealthStatus {
   status: "ok" | "degraded" | "error";
@@ -32,8 +33,18 @@ export class RestApi {
     this.logger = logger;
     this.deps = deps ?? {};
     this.authOptions = authOptions ?? {};
+    this.setupRateLimiting();
     this.setupAuth();
     this.setupRoutes();
+  }
+
+  private async setupRateLimiting(): Promise<void> {
+    await this.app.register(rateLimit, {
+      // maximum number of requests per IP address per time window
+      max: 100,
+      // time window for rate limiting
+      timeWindow: "1 minute",
+    });
   }
 
   private setupAuth(): void {
