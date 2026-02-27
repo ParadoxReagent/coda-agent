@@ -20,6 +20,11 @@ interface Subscription {
   handlerName: string;
 }
 
+function escapeRegex(str: string): string {
+  // Escape characters with special meaning in regular expressions
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Redis Streams-backed event bus with consumer groups, idempotency, and dead letter queue.
  * Replaces InProcessEventBus for production use.
@@ -65,9 +70,8 @@ export class RedisStreamEventBus implements EventBus {
     pattern: string,
     handler: (event: CodaEvent) => Promise<void>
   ): void {
-    const regexStr = pattern
-      .replace(/\./g, "\\.")
-      .replace(/\*/g, ".*");
+    const escapedPattern = escapeRegex(pattern);
+    const regexStr = escapedPattern.replace(/\\\*/g, ".*");
     const regex = new RegExp(`^${regexStr}$`);
 
     // Derive handler name from pattern + subscription index for idempotency
