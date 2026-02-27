@@ -151,6 +151,23 @@ export function createMockSkill(options: MockSkillOptions = {}): Skill {
 }
 
 // ---- Mock Event Bus ----
+
+/**
+ * Convert a simple glob-like pattern (where '.' matches a literal dot and '*'
+ * matches any sequence of characters) into a safe regular expression.
+ *
+ * This function first escapes all regular expression metacharacters,
+ * including backslashes, and then expands '*' into '.*' to preserve the
+ * original glob semantics.
+ */
+function globPatternToRegex(pattern: string): RegExp {
+  // Escape all regex special characters, including backslash.
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Now turn glob '*' (which is escaped as '\*') into '.*'.
+  const regexSource = "^" + escaped.replace(/\\\*/g, ".*") + "$";
+  return new RegExp(regexSource);
+}
+
 export function createMockEventBus(): EventBus & {
   publishedEvents: CodaEvent[];
   handlers: Map<string, ((event: CodaEvent) => Promise<void>)[]>;
@@ -168,9 +185,7 @@ export function createMockEventBus(): EventBus & {
       publishedEvents.push(event);
       // Dispatch to matching subscribers
       for (const [pattern, fns] of handlers) {
-        const regex = new RegExp(
-          `^${pattern.replace(/\./g, "\\.").replace(/\*/g, ".*")}$`
-        );
+        const regex = globPatternToRegex(pattern);
         if (regex.test(event.eventType)) {
           for (const fn of fns) {
             await fn(event);
