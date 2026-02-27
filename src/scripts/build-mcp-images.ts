@@ -76,7 +76,7 @@ function buildImage(serverName: string, serverDir: string, logger: any): void {
   );
 
   try {
-    execSync(`docker build -t ${imageName} ${serverDir}`, {
+    execFileSync("docker", ["build", "-t", imageName, serverDir], {
       stdio: "inherit",
     });
     logger.info({ server: serverName, image: imageName }, "Successfully built image");
