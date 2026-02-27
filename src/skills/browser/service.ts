@@ -318,7 +318,7 @@ export class BrowserService {
    * Prefer role-based selectors which are more robust than CSS.
    */
   private buildLocator(role: string, name: string): string {
-    const escaped = name.replace(/"/g, '\\"');
+    const escaped = name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     switch (role) {
       case "button":
         return `button:has-text("${escaped}")`;
