@@ -57,11 +57,14 @@ function parseArgs(): BuildOptions {
 
 function imageExists(imageName: string): boolean {
   try {
-    execSync(`docker images -q ${imageName}`, { stdio: "pipe" });
-    const output = execSync(`docker images -q ${imageName}`, {
-      encoding: "utf-8",
-      stdio: "pipe"
-    }).trim();
+    const output = execFileSync(
+      "docker",
+      ["images", "-q", imageName],
+      {
+        encoding: "utf-8",
+        stdio: "pipe",
+      }
+    ).trim();
     return output.length > 0;
   } catch {
     return false;
@@ -77,9 +80,13 @@ function buildImage(serverName: string, serverDir: string, logger: any): void {
   );
 
   try {
-    execSync(`docker build -t ${imageName} ${serverDir}`, {
-      stdio: "inherit",
-    });
+    execFileSync(
+      "docker",
+      ["build", "-t", imageName, serverDir],
+      {
+        stdio: "inherit",
+      }
+    );
     logger.info({ server: serverName, image: imageName }, "Successfully built image");
   } catch (error) {
     throw new Error(`Failed to build Docker image: ${error instanceof Error ? error.message : String(error)}`);
