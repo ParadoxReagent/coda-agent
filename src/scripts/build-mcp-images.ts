@@ -57,8 +57,7 @@ function parseArgs(): BuildOptions {
 
 function imageExists(imageName: string): boolean {
   try {
-    execSync(`docker images -q ${imageName}`, { stdio: "pipe" });
-    const output = execSync(`docker images -q ${imageName}`, {
+    const output = execFileSync("docker", ["images", "-q", imageName], {
       encoding: "utf-8",
       stdio: "pipe"
     }).trim();
