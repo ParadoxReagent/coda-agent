@@ -13,7 +13,7 @@
  *   npm run build:mcp-images -- context7 --force # Rebuild specific server
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -319,7 +319,7 @@ async function main() {
         }
 
         logger.info({ name: extra.name, image: extra.image, path: extra.dir }, "Building extra image");
-        execSync(`docker build -t ${extra.image} ${extra.dir}`, { stdio: "inherit" });
+        execFileSync("docker", ["build", "-t", extra.image, extra.dir], { stdio: "inherit" });
         logger.info({ name: extra.name, image: extra.image }, "Successfully built extra image");
         built++;
       } catch (error) {
