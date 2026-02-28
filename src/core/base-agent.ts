@@ -102,6 +102,7 @@ export class BaseAgent {
       messages,
       tools: tools && tools.length > 0 ? tools : undefined,
       maxTokens: maxResponseTokens,
+      signal: abortSignal,
     });
 
     totalInputTokens += response.usage.inputTokens ?? 0;
@@ -165,6 +166,7 @@ export class BaseAgent {
         messages: continuationMessages,
         tools: tools && tools.length > 0 ? tools : undefined,
         maxTokens: maxResponseTokens,
+        signal: abortSignal,
       });
 
       totalInputTokens += response.usage.inputTokens ?? 0;

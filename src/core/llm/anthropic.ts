@@ -58,13 +58,16 @@ export class AnthropicProvider implements LLMProvider {
       return { role: m.role as "user" | "assistant", content: blocks };
     });
 
-    const response = await this.client.messages.create({
-      model: params.model,
-      max_tokens: params.maxTokens ?? 4096,
-      system: params.system,
-      messages: messages as Anthropic.MessageParam[],
-      ...(tools && tools.length > 0 ? { tools: tools as unknown as Anthropic.Tool[] } : {}),
-    });
+    const response = await this.client.messages.create(
+      {
+        model: params.model,
+        max_tokens: params.maxTokens ?? 4096,
+        system: params.system,
+        messages: messages as Anthropic.MessageParam[],
+        ...(tools && tools.length > 0 ? { tools: tools as unknown as Anthropic.Tool[] } : {}),
+      },
+      params.signal ? { signal: params.signal } : undefined
+    );
 
     return this.toResponse(response, params.model);
   }

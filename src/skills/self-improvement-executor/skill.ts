@@ -207,15 +207,21 @@ export class SelfImprovementExecutorSkill implements Skill {
 
     const specificProposalId = input.proposal_id as string | undefined;
 
+    // Pre-assign the runId so it's available in the response before the async cycle starts.
+    const runId = crypto.randomUUID();
+    this.currentRunId = runId;
+    this.currentRunStatus = "running";
+
     // Run async but track status
-    this.runCycle(specificProposalId).catch((err) => {
+    this.runCycle(specificProposalId, runId).catch((err) => {
       this.logger?.error({ error: err }, "Self-improvement run failed unexpectedly");
+      this.currentRunStatus = "complete";
     });
 
     return JSON.stringify({
       success: true,
       message: "Self-improvement cycle started. Use self_improvement_status to check progress.",
-      runId: this.currentRunId,
+      runId,
     });
   }
 
@@ -268,9 +274,9 @@ export class SelfImprovementExecutorSkill implements Skill {
   /**
    * Main self-improvement execution cycle.
    * Protected by a Redis distributed lock to prevent concurrent runs.
+   * When called via triggerRun, the runId is pre-assigned so it can be returned immediately.
    */
-  async runCycle(specificProposalId?: string): Promise<void> {
-    const runId = crypto.randomUUID();
+  async runCycle(specificProposalId?: string, runId = crypto.randomUUID()): Promise<void> {
     this.currentRunId = runId;
     this.currentRunStatus = "running";
 
@@ -299,6 +305,10 @@ export class SelfImprovementExecutorSkill implements Skill {
         this.logger?.warn("Self-improvement cycle aborted: lock already held");
         outcome = "SKIPPED";
         cycleError = "Redis lock already held — another run is in progress";
+        await this.messageSender?.broadcast(
+          "Self-improvement cycle skipped: another run is already in progress.",
+          "self-improvement-executor"
+        );
         return;
       }
 
@@ -309,6 +319,12 @@ export class SelfImprovementExecutorSkill implements Skill {
           this.logger?.info("No eligible proposals found for execution");
           outcome = "SKIPPED";
           cycleError = "No eligible proposals found";
+          await this.messageSender?.broadcast(
+            "Self-improvement cycle skipped: no approved proposals found. " +
+            "Use `improvement_proposals_list` to view pending proposals and " +
+            "`improvement_proposal_decide` to approve one before running the executor.",
+            "self-improvement-executor"
+          );
           return;
         }
 
@@ -317,8 +333,16 @@ export class SelfImprovementExecutorSkill implements Skill {
           { proposalId, title: proposal.title, category: proposal.category },
           "Selected proposal for execution"
         );
+        await this.messageSender?.broadcast(
+          `Self-improvement cycle started (run ${runId.slice(0, 8)}): **${proposal.title}** [${proposal.category}]`,
+          "self-improvement-executor"
+        );
 
         // Step 3: Blast radius analysis
+        await this.messageSender?.broadcast(
+          "Step 1/5: Analyzing blast radius (code-archaeologist)...",
+          "self-improvement-executor"
+        );
         const archaeologistStep = await this.runBlastRadiusAnalysis(proposal, runAbortController.signal);
         steps.push(archaeologistStep);
         if (!archaeologistStep.passed) {
@@ -339,8 +363,18 @@ export class SelfImprovementExecutorSkill implements Skill {
           const errMsg = `Blast radius too large: ${blastRadius.affected_files.length} files > limit ${this.config.executor_blast_radius_limit}`;
           steps.push({ name: "blast-radius-gate", passed: false, durationMs: 0, error: errMsg });
           cycleError = errMsg;
+          await this.messageSender?.broadcast(
+            `Self-improvement cycle aborted: ${errMsg}`,
+            "self-improvement-executor"
+          );
           return;
         }
+
+        await this.messageSender?.broadcast(
+          `Step 2/5: Generating code fix (code-surgeon) — risk: ${blastRadius?.risk_level ?? "unknown"}, ` +
+          `${blastRadius?.affected_files.length ?? 0} affected file(s)...`,
+          "self-improvement-executor"
+        );
 
         // Step 4: Generate fix
         const surgeonStep = await this.runCodeSurgeon(proposal, blastRadius, runAbortController.signal);
@@ -363,6 +397,10 @@ export class SelfImprovementExecutorSkill implements Skill {
           const errMsg = `Proposal out of scope: ${surgeonOutput.out_of_scope_reason ?? "unknown reason"}`;
           steps.push({ name: "scope-gate", passed: false, durationMs: 0, error: errMsg });
           cycleError = errMsg;
+          await this.messageSender?.broadcast(
+            `Self-improvement cycle aborted: ${errMsg}`,
+            "self-improvement-executor"
+          );
           return;
         }
 
@@ -377,6 +415,10 @@ export class SelfImprovementExecutorSkill implements Skill {
           const errMsg = `Path guardrail violations: ${pathViolations.join("; ")}`;
           steps.push({ name: "path-guardrail", passed: false, durationMs: 0, error: errMsg });
           cycleError = errMsg;
+          await this.messageSender?.broadcast(
+            `Self-improvement cycle aborted: ${errMsg}`,
+            "self-improvement-executor"
+          );
           return;
         }
 
@@ -384,8 +426,17 @@ export class SelfImprovementExecutorSkill implements Skill {
           const errMsg = `Too many files to change: ${surgeonOutput.changes.length} > limit ${this.config.executor_max_files}`;
           steps.push({ name: "file-count-gate", passed: false, durationMs: 0, error: errMsg });
           cycleError = errMsg;
+          await this.messageSender?.broadcast(
+            `Self-improvement cycle aborted: ${errMsg}`,
+            "self-improvement-executor"
+          );
           return;
         }
+
+        await this.messageSender?.broadcast(
+          `Step 3/5: Pushing ${surgeonOutput.changes.length} file(s) to GitHub...`,
+          "self-improvement-executor"
+        );
 
         // Step 5: Create branch + push files
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -399,8 +450,17 @@ export class SelfImprovementExecutorSkill implements Skill {
         steps.push(gitStep);
         if (!gitStep.passed) {
           cycleError = gitStep.error;
+          await this.messageSender?.broadcast(
+            `Self-improvement cycle failed at git-push: ${gitStep.error}`,
+            "self-improvement-executor"
+          );
           return;
         }
+
+        await this.messageSender?.broadcast(
+          `Step 4/5: Running test pipeline (build → test → shadow container) on branch \`${branchName}\`...`,
+          "self-improvement-executor"
+        );
 
         // Step 6: Build + test + shadow container
         const testStep = await this.runTestPipeline(
@@ -413,8 +473,16 @@ export class SelfImprovementExecutorSkill implements Skill {
         const testsPassed = steps.filter((s) => s.name.startsWith("test-")).every((s) => s.passed);
         if (!testsPassed) {
           cycleError = "Test pipeline failed — no PR created";
+          await this.messageSender?.broadcast(
+            "Step 4/5: Test pipeline FAILED — skipping PR creation. Check `self_improvement_status` for details.",
+            "self-improvement-executor"
+          );
           // Don't return — still create report
         } else {
+          await this.messageSender?.broadcast(
+            "Step 4/5: Tests passed. Step 5/5: Creating pull request...",
+            "self-improvement-executor"
+          );
           // Step 7: Create PR
           const prStep = await this.createPullRequest(
             branchName,
@@ -447,81 +515,81 @@ export class SelfImprovementExecutorSkill implements Skill {
 
       // Always clean up any lingering sandbox containers
       await this.cleanupSandboxContainers();
-    }
 
-    const durationMs = Date.now() - cycleStart;
+      const durationMs = Date.now() - cycleStart;
 
-    // Step 8: Report (best-effort — never block on reporter failure)
-    try {
-      if (proposalId) {
-        const proposal = await this.db?.select()
-          .from(improvementProposals)
-          .where(eq(improvementProposals.id, proposalId))
-          .limit(1);
-        const proposalData = proposal?.[0];
-
-        narrative = await this.runReporter(
-          outcome,
-          proposalData,
-          branchName,
-          prUrl,
-          steps,
-          blastRadius,
-          cycleError,
-          runAbortController.signal
-        );
-      }
-    } catch (err) {
-      this.logger?.warn({ error: err }, "Reporter failed (non-fatal)");
-    }
-
-    // Step 9: Update DB
-    if (proposalId) {
+      // Step 8: Report (best-effort — never block on reporter failure)
       try {
-        await this.db?.insert(selfImprovementRuns).values({
-          proposalId,
-          outcome,
-          branchName: branchName ?? null,
-          prUrl: prUrl ?? null,
-          targetFiles,
-          steps,
-          blastRadius: blastRadius ?? {},
-          narrative: narrative ?? null,
-          error: cycleError ?? null,
-          durationMs,
-          completedAt: new Date(),
-        });
+        if (proposalId) {
+          const proposal = await this.db?.select()
+            .from(improvementProposals)
+            .where(eq(improvementProposals.id, proposalId))
+            .limit(1);
+          const proposalData = proposal?.[0];
 
-        // Update proposal status on success
-        if (outcome === "PASS") {
-          await this.db?.update(improvementProposals)
-            .set({ status: "applied", appliedAt: new Date() })
-            .where(eq(improvementProposals.id, proposalId));
+          narrative = await this.runReporter(
+            outcome,
+            proposalData,
+            branchName,
+            prUrl,
+            steps,
+            blastRadius,
+            cycleError,
+            runAbortController.signal
+          );
         }
       } catch (err) {
-        this.logger?.error({ error: err }, "Failed to persist run record");
+        this.logger?.warn({ error: err }, "Reporter failed (non-fatal)");
       }
+
+      // Step 9: Update DB
+      if (proposalId) {
+        try {
+          await this.db?.insert(selfImprovementRuns).values({
+            proposalId,
+            outcome,
+            branchName: branchName ?? null,
+            prUrl: prUrl ?? null,
+            targetFiles,
+            steps,
+            blastRadius: blastRadius ?? {},
+            narrative: narrative ?? null,
+            error: cycleError ?? null,
+            durationMs,
+            completedAt: new Date(),
+          });
+
+          // Update proposal status on success
+          if (outcome === "PASS") {
+            await this.db?.update(improvementProposals)
+              .set({ status: "applied", appliedAt: new Date() })
+              .where(eq(improvementProposals.id, proposalId));
+          }
+        } catch (err) {
+          this.logger?.error({ error: err }, "Failed to persist run record");
+        }
+      }
+
+      this.lastResult = {
+        runId,
+        proposalId: proposalId ?? "unknown",
+        outcome,
+        branchName,
+        prUrl,
+        targetFiles,
+        steps,
+        blastRadius,
+        narrative,
+        error: cycleError,
+        durationMs,
+      };
+      this.currentRunStatus = "complete";
+
+      this.logger?.info(
+        { runId, outcome, proposalId, prUrl, durationMs },
+        "Self-improvement cycle complete"
+      );
     }
-
-    this.lastResult = {
-      runId,
-      proposalId: proposalId ?? "unknown",
-      outcome,
-      branchName,
-      prUrl,
-      targetFiles,
-      steps,
-      blastRadius,
-      narrative,
-      error: cycleError,
-      durationMs,
-    };
-    this.currentRunStatus = "complete";
-
-    this.logger?.info(
-      { runId, outcome, proposalId, prUrl, durationMs },
-      "Self-improvement cycle complete"
-    );
   }
 
   // ── Sub-steps ─────────────────────────────────────────────────────────────
@@ -796,7 +864,7 @@ export class SelfImprovementExecutorSkill implements Skill {
       `7. ALWAYS: docker_sandbox_stop then docker_sandbox_remove "${containerName}"`,
       ``,
       `Return a JSON object with the test pipeline results per step.`,
-      `Baseline test failures: 35 (any new failures = FAIL for that step)`,
+      `Baseline test failures: 0 (all 628 tests pass; any regression = FAIL for that step)`,
     ].join("\n");
 
     try {

@@ -97,7 +97,10 @@ export class OpenAICompatProvider implements LLMProvider {
       ...(tools && tools.length > 0 ? { tools } : {}),
     };
 
-    const response = await this.client.chat.completions.create(requestParams);
+    const response = await this.client.chat.completions.create(
+      requestParams,
+      params.signal ? { signal: params.signal } : undefined
+    );
 
     return await this.toResponse(response, params.model);
   }

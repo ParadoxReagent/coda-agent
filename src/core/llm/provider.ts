@@ -42,6 +42,7 @@ export interface LLMChatParams {
   messages: LLMMessage[];
   tools?: LLMToolDefinition[];
   maxTokens?: number;
+  signal?: AbortSignal;
 }
 
 export interface LLMProvider {

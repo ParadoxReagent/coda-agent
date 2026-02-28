@@ -234,20 +234,30 @@ export class SelfImprovementSkill implements Skill {
       .orderBy(desc(improvementProposals.createdAt))
       .limit(limit);
 
-    return JSON.stringify({
-      proposals: rows.map(r => ({
-        id: r.id,
-        category: r.category,
-        title: r.title,
-        description: r.description,
-        priority: r.priority,
-        status: r.status,
-        target_section: r.targetSection,
-        has_diff: !!r.proposedDiff,
-        created_at: r.createdAt.toISOString(),
-      })),
-      total: rows.length,
-    });
+    const EXECUTOR_ELIGIBLE_CATEGORIES = new Set(["capability_gap", "failure_mode", "tool_usage", "routing"]);
+
+    // Format as a readable table so the agent cannot omit the UUIDs when presenting to the user.
+    const lines: string[] = [
+      `Found ${rows.length} proposal(s) with status="${status}":`,
+      "",
+    ];
+    for (const r of rows) {
+      const executorEligible = EXECUTOR_ELIGIBLE_CATEGORIES.has(r.category);
+      lines.push(
+        `ID: ${r.id}`,
+        `  Title:    [P${r.priority ?? "?"}] ${r.title}`,
+        `  Category: ${r.category}${executorEligible ? " (executor-eligible)" : " (prompt/config — use decide tool only)"}`,
+        `  Status:   ${r.status}`,
+        `  Created:  ${r.createdAt.toISOString()}`,
+        ""
+      );
+    }
+    lines.push(
+      "To approve a proposal: improvement_proposal_decide(proposal_id=<ID>, decision=\"approved\")",
+      "Executor picks up: capability_gap, failure_mode, tool_usage, routing (status=approved only).",
+    );
+
+    return lines.join("\n");
   }
 
   private async decideProposal(input: Record<string, unknown>): Promise<string> {
