@@ -10,8 +10,8 @@
 ARG BASE_IMAGE=coda-core:latest
 FROM ${BASE_IMAGE}
 
-# Install git for any runtime tooling needs
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+# Install git for any runtime tooling needs (base image is Alpine — use apk, not apt-get)
+RUN apk add --no-cache git
 
 # Run as non-root for security
 USER node

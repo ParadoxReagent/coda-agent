@@ -251,10 +251,9 @@ echo -e "${BLUE}🚀 Building and starting containers...${NC}"
 echo -e "${YELLOW}This may take a few minutes on first run...${NC}"
 echo ""
 
-# Clean up old Docker resources to prevent disk exhaustion
-echo -e "${YELLOW}Cleaning up old Docker resources...${NC}"
-docker image prune -af
-docker builder prune -af
+# Clean up dangling (untagged) images only — preserve layer cache for fast rebuilds
+echo -e "${YELLOW}Cleaning up dangling Docker images...${NC}"
+docker image prune -f
 echo -e "${GREEN}✓ Docker cleanup complete${NC}"
 echo ""
 

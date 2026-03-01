@@ -13,7 +13,7 @@
  *   npm run build:mcp-images -- context7 --force # Rebuild specific server
  */
 
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,7 +76,7 @@ function buildImage(serverName: string, serverDir: string, logger: any): void {
   );
 
   try {
-    execSync(`docker build -t ${imageName} ${serverDir}`, {
+    execFileSync("docker", ["build", "-t", imageName, serverDir], {
       stdio: "inherit",
     });
     logger.info({ server: serverName, image: imageName }, "Successfully built image");

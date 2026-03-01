@@ -9,9 +9,14 @@ secrets/
 docker-compose.yml
 .circleci
 .claude
+.github
 .vscode
 *.log
 coverage/
 __tests__/
 **/*.test.ts
 **/*.spec.ts
+scripts/
+config/
+tmp/
+data/

@@ -1,6 +1,8 @@
+ARG PNPM_VERSION=9.15.0
 FROM node:22-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+ARG PNPM_VERSION
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 WORKDIR /app
 
@@ -16,7 +18,8 @@ RUN pnpm run build
 # --- Runtime ---
 FROM node:22-alpine
 
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+ARG PNPM_VERSION
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Install system dependencies
 RUN apk add --no-cache su-exec python3 py3-pip
