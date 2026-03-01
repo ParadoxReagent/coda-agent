@@ -23,6 +23,11 @@ jobs:
       - run:
           name: Lint
           command: pnpm run lint
+          runner-test:
+    machine: true
+    resource_class: cosmic_pixel_labs/coda-agent
+    steps:
+      - run: echo "Hi I'm on Runners!"
 
   test-unit:
     docker:

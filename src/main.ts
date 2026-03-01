@@ -461,6 +461,8 @@ async function main() {
       prompt_evolution_enabled: config.self_improvement?.prompt_evolution_enabled,
       gap_detection_enabled: config.self_improvement?.gap_detection_enabled,
       gap_detection_cron: config.self_improvement?.gap_detection_cron,
+      executor_github_owner: config.self_improvement?.executor_github_owner,
+      executor_github_repo: config.self_improvement?.executor_github_repo,
     });
     selfImprovementSkill.setPromptManager(promptManager);
     selfImprovementSkill.setAuditService(auditService);
@@ -474,6 +476,7 @@ async function main() {
       () => skillRegistry.listSkills().map(s => s.name)
     );
     skillRegistry.register(selfImprovementSkill);
+    selfImprovementSkill.setSkillRegistry(skillRegistry);
 
     // Wire few-shot service (5.7)
     if (config.self_improvement?.few_shot_enabled !== false) {
