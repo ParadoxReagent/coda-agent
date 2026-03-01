@@ -200,8 +200,8 @@ Bot: Found 1 note: "The WiFi password for the office is sunshine42"
 
 coda has three types of capabilities: **integrations** (external service connectors), **built-in skills** (agent abilities), and **agent skills** (community/custom instruction-based skills).
 
-- **[Integrations](integrations_readme.md)** — MCP (Model Context Protocol), n8n, Firecrawl (web scraping/search)
-- **[Skills](skills_readme.md)** — Reminders, Notes, Memory, Scheduler, Agent Skills (community/custom)
+- **[Integrations](docs/integrations/README.md)** — MCP (Model Context Protocol), n8n, Firecrawl (web scraping/search)
+- **[Skills](docs/skills/README.md)** — Reminders, Notes, Memory, Scheduler, Agent Skills (community/custom)
 
 ### Morning Briefing
 
@@ -520,15 +520,19 @@ pnpm run lint
 
 ## Documentation
 
-- [Integrations](integrations_readme.md) — n8n, Firecrawl
-- [Skills](skills_readme.md) — Reminders, Notes, Memory, Scheduler, Agent Skills
-- [Tool Catalog](tools_catalog.md) — Complete reference for all 64+ tools (tiers, flags, descriptions)
-- [Skill Docker Images](docs/skill-docker-images.md) — Pre-built images for skills with dependencies
-- [Architecture Overview](personal-assistant-architecture.md)
-- [Phase 1 Plan](phase-1-foundation.md)
-- [Phase 2 Plan](phase-2-mvp-skills.md)
-- [Phase 3 Plan](phase-3-home-integration.md)
-- [Phase 4-7 Plans](phase-3-home-integration.md)
+- [Integrations](docs/integrations/README.md) — n8n, Firecrawl, MCP
+- [MCP Integration](docs/integrations/mcp.md) — Detailed MCP setup guide
+- [Skills](docs/skills/README.md) — Reminders, Notes, Memory, Scheduler, Agent Skills
+- [Tool Catalog](docs/skills/tools-catalog.md) — Complete reference for all 64+ tools (tiers, flags, descriptions)
+- [Skill Docker Images](docs/skills/docker-images.md) — Pre-built images for skills with dependencies
+- [Architecture Overview](docs/architecture/overview.md)
+- [Dual LLM Routing](docs/architecture/dual-llm.md)
+- [Self-Improvement](docs/self-improvement/README.md)
+- [Phase 1 Plan](plans/phase-1-foundation.md)
+- [Phase 2 Plan](plans/phase-2-mvp-skills.md)
+- [Phase 3 Plan](plans/phase-3-home-integration.md)
+- [Phase 4-7 Plans](plans/phase-4-hardening.md)
+- [Roadmap](plans/roadmap.md)
 
 ## License
 

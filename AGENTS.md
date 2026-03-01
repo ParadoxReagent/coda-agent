@@ -161,22 +161,22 @@ DB-backed overrides from `PromptManager` take precedence over these file default
 
 1. Create `src/skills/{name}/skill.ts` implementing the `Skill` interface
 2. Register in `src/skills/registry.ts` or via the dynamic loader
-3. Update `skills_readme.md` (root)
+3. Update `docs/skills/README.md`
 4. If it has config options, add them to `config/config.example.yaml` and mirror into `config/config.yaml`
-5. Update `agent_roadmap.md` — mark the feature as done
+5. Update `plans/agent_roadmap.md` — mark the feature as done
 
 ### New Integration
 
 1. Create `src/integrations/{name}/` with implementation
-2. Update `integrations_readme.md` (root)
+2. Update `docs/integrations/README.md`
 3. Add config section to `config/config.example.yaml` and mirror into `config/config.yaml`
-4. Update `agent_roadmap.md`
+4. Update `plans/agent_roadmap.md`
 
 ### New Agent Preset
 
 1. Create `src/agents/{name}/` with `soul.md`, `tools.md`, `config.yaml`
 2. `AgentLoader` scans `src/agents/` automatically — no registration needed
-3. Update `skills_readme.md` if the agent exposes tools
+3. Update `docs/skills/README.md` if the agent exposes tools
 
 ### New DB Migration
 
@@ -198,8 +198,8 @@ DB-backed overrides from `PromptManager` take precedence over these file default
 
 | What changed | Files to update |
 |---|---|
-| New or changed integration | `integrations_readme.md`, `config/config.example.yaml` + `config/config.yaml`, `agent_roadmap.md` |
-| New or changed skill | `skills_readme.md`, `config/config.example.yaml` + `config/config.yaml` (if config), `agent_roadmap.md` |
+| New or changed integration | `docs/integrations/README.md`, `config/config.example.yaml` + `config/config.yaml`, `plans/agent_roadmap.md` |
+| New or changed skill | `docs/skills/README.md`, `config/config.example.yaml` + `config/config.yaml` (if config), `plans/agent_roadmap.md` |
 | New config option | `config/config.example.yaml` (commented, with default) **and** `config/config.yaml` |
 | Feature completed | `agent_roadmap.md` — mark as done |
 
