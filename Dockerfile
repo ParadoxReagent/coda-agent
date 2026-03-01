@@ -2,7 +2,7 @@ ARG PNPM_VERSION=9.15.0
 FROM node:22-alpine AS builder
 
 ARG PNPM_VERSION
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN pnpm run build
 FROM node:22-alpine
 
 ARG PNPM_VERSION
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Install system dependencies
 RUN apk add --no-cache su-exec python3 py3-pip
