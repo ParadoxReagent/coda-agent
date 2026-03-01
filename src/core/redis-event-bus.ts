@@ -196,7 +196,6 @@ export class RedisStreamEventBus implements EventBus {
     // fields is [key, value, key, value, ...]
     const dataIndex = fields.indexOf("data");
     if (dataIndex === -1 || dataIndex + 1 >= fields.length) {
-      // Malformed message, ACK and skip
       await this.redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);
       return;
     }
@@ -205,33 +204,40 @@ export class RedisStreamEventBus implements EventBus {
     try {
       event = JSON.parse(fields[dataIndex + 1]!) as CodaEvent;
     } catch {
-      // Unparseable, ACK and skip
       this.logger.warn({ messageId }, "Unparseable event in stream, skipping");
       await this.redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);
       return;
     }
 
+    // Resolve matching subscriptions once
+    const matchingSubs = this.subscriptions.filter(sub => sub.pattern.test(event.eventType));
+
+    if (matchingSubs.length === 0) {
+      await this.redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);
+      return;
+    }
+
+    const eventId = event.eventId ?? messageId;
+    const idemKeys = matchingSubs.map(sub => `idem:${eventId}:${sub.handlerName}`);
+
+    // Batch-check all idempotency keys in a single round-trip instead of N sequential GETs
+    const idemResults = await this.redis.mget(...idemKeys);
+
     let allHandlersSucceeded = true;
+    const pipeline = this.redis.pipeline();
 
-    for (const sub of this.subscriptions) {
-      if (!sub.pattern.test(event.eventType)) continue;
+    for (let i = 0; i < matchingSubs.length; i++) {
+      const sub = matchingSubs[i]!;
+      const idemKey = idemKeys[i]!;
 
-      const eventId = event.eventId ?? messageId;
-      const idemKey = `idem:${eventId}:${sub.handlerName}`;
-
-      // Idempotency check
-      const alreadyProcessed = await this.redis.get(idemKey);
-      if (alreadyProcessed) continue;
+      if (idemResults[i]) continue; // Already processed by a prior consumer
 
       try {
         await sub.handler(event);
-        // Mark as processed
-        await this.redis.set(
-          idemKey,
-          "1",
-          "EX",
-          RETENTION.IDEMPOTENCY_KEY_TTL
-        );
+        // Queue the idempotency mark — all successful SETs flushed in one batch below
+        pipeline.set(idemKey, "1", "EX", RETENTION.IDEMPOTENCY_KEY_TTL);
+        // Clean up retry count on success (fixes slow memory leak on retried-then-recovered handlers)
+        this.retryCounts.delete(`${messageId}:${sub.handlerName}`);
       } catch (err) {
         allHandlersSucceeded = false;
         const retryKey = `${messageId}:${sub.handlerName}`;
@@ -239,7 +245,6 @@ export class RedisStreamEventBus implements EventBus {
         this.retryCounts.set(retryKey, count);
 
         if (count >= MAX_RETRIES) {
-          // Dead letter
           this.logger.error(
             {
               messageId,
@@ -264,7 +269,6 @@ export class RedisStreamEventBus implements EventBus {
             messageId
           );
 
-          // Publish system alert about dead letter
           await this.publish({
             eventType: "alert.system.dead_letter",
             timestamp: new Date().toISOString(),
@@ -293,18 +297,17 @@ export class RedisStreamEventBus implements EventBus {
       }
     }
 
-    // ACK the message if all handlers succeeded or max retried
+    // Flush all queued idempotency SET operations in a single round-trip
+    await pipeline.exec();
+
     if (allHandlersSucceeded) {
       await this.redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);
     } else {
-      // Check if all failed handlers have exhausted retries
-      const allExhausted = this.subscriptions
-        .filter((sub) => sub.pattern.test(event.eventType))
-        .every((sub) => {
-          const retryKey = `${messageId}:${sub.handlerName}`;
-          const count = this.retryCounts.get(retryKey) ?? 0;
-          return count === 0; // 0 means either succeeded or was dead-lettered
-        });
+      // ACK only when all failed handlers have exhausted retries
+      const allExhausted = matchingSubs.every((sub) => {
+        const count = this.retryCounts.get(`${messageId}:${sub.handlerName}`) ?? 0;
+        return count === 0; // 0 means either succeeded or was dead-lettered
+      });
 
       if (allExhausted) {
         await this.redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);

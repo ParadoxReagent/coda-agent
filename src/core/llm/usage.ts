@@ -52,6 +52,8 @@ export class UsageTracker {
     usage: { inputTokens: number | null; outputTokens: number | null },
     tier?: "light" | "heavy"
   ): Promise<void> {
+    this.pruneOldRecords();
+
     const cost = this.calculateCost(model, usage);
 
     this.records.push({
@@ -202,6 +204,31 @@ export class UsageTracker {
     }
 
     return result;
+  }
+
+  /**
+   * Remove records from before today and cap the array at 10,000 entries.
+   * Also resets the daily alert flag when the calendar day rolls over.
+   */
+  private pruneOldRecords(): void {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Find the first index of today's records (records are appended in order)
+    let i = 0;
+    while (i < this.records.length && this.records[i]!.timestamp < today) {
+      i++;
+    }
+    if (i > 0) {
+      this.records.splice(0, i);
+      this.alertFired = false; // Reset alert for the new day
+    }
+
+    // Hard cap: never accumulate more than 10,000 records even within a single day
+    const MAX_RECORDS = 10_000;
+    if (this.records.length > MAX_RECORDS) {
+      this.records.splice(0, this.records.length - MAX_RECORDS);
+    }
   }
 
   private calculateCost(

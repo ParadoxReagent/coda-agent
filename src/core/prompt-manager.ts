@@ -17,6 +17,12 @@ export interface PromptSectionResult {
 }
 
 export class PromptManager {
+  // Cache active prompt sections to avoid DB queries on every message.
+  // Prompt sections change rarely (only on operator activation), so a 60s TTL
+  // is a safe trade-off between freshness and performance.
+  private sectionCache = new Map<string, { result: PromptSectionResult | null; expiresAt: number }>();
+  private readonly CACHE_TTL_MS = 60_000;
+
   constructor(
     private db: Database,
     private logger: Logger
@@ -26,8 +32,15 @@ export class PromptManager {
    * Get the active version of a named prompt section.
    * Returns null if no DB-backed version exists (caller uses hardcoded default).
    * For light tier: may randomly select an A/B variant based on ab_weight.
+   * Results are cached for 60 seconds to avoid repeated DB queries.
    */
   async getSection(sectionName: string, tier?: "light" | "heavy"): Promise<PromptSectionResult | null> {
+    const cacheKey = `${sectionName}:${tier ?? ""}`;
+    const cached = this.sectionCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.result;
+    }
+
     try {
       // Get all active versions for this section
       const rows = await this.db
@@ -40,7 +53,12 @@ export class PromptManager {
         .orderBy(desc(promptVersions.version))
         .limit(5);
 
-      if (rows.length === 0) return null;
+      if (rows.length === 0) {
+        this.sectionCache.set(cacheKey, { result: null, expiresAt: Date.now() + this.CACHE_TTL_MS });
+        return null;
+      }
+
+      let result: PromptSectionResult;
 
       // Check for A/B variants (only for light tier)
       if (tier === "light") {
@@ -51,25 +69,30 @@ export class PromptManager {
           const variant = variants[0]!;
           const weight = variant.abWeight ?? 0.5;
           if (Math.random() < weight) {
-            return {
-              content: variant.content,
-              version: variant.version,
-              isAbVariant: true,
-            };
+            result = { content: variant.content, version: variant.version, isAbVariant: true };
+            this.sectionCache.set(cacheKey, { result, expiresAt: Date.now() + this.CACHE_TTL_MS });
+            return result;
           }
         }
       }
 
       // Return primary active version (non-variant, highest version)
       const primary = rows.find(r => !r.isAbVariant) ?? rows[0]!;
-      return {
-        content: primary.content,
-        version: primary.version,
-        isAbVariant: false,
-      };
+      result = { content: primary.content, version: primary.version, isAbVariant: false };
+      this.sectionCache.set(cacheKey, { result, expiresAt: Date.now() + this.CACHE_TTL_MS });
+      return result;
     } catch (err) {
       this.logger.debug({ error: err, sectionName }, "prompt-manager.getSection failed");
-      return null;
+      return null; // Don't cache errors — they may be transient
+    }
+  }
+
+  /** Invalidate all cached entries for a section name. */
+  private invalidateCache(sectionName: string): void {
+    for (const key of this.sectionCache.keys()) {
+      if (key.startsWith(`${sectionName}:`)) {
+        this.sectionCache.delete(key);
+      }
     }
   }
 
@@ -123,6 +146,7 @@ export class PromptManager {
         eq(promptVersions.version, version)
       ));
 
+    this.invalidateCache(sectionName);
     this.logger.info({ sectionName, version }, "Activated prompt version");
   }
 
@@ -151,6 +175,7 @@ export class PromptManager {
     }
 
     await this.activateVersion(sectionName, previous.version);
+    // activateVersion already calls invalidateCache via its own path
     return true;
   }
 

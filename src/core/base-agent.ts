@@ -198,33 +198,35 @@ export class BaseAgent {
     toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
     timeout: number
   ): Promise<Array<{ toolCallId: string; toolName: string; result: string }>> {
-    const results: Array<{ toolCallId: string; toolName: string; result: string }> = [];
-
-    for (const tc of toolCalls) {
-      try {
+    // Execute all tool calls concurrently — the LLM already batched them as independent calls
+    const settled = await Promise.allSettled(
+      toolCalls.map(async (tc) => {
         const result = await ResilientExecutor.execute(
           () => this.skills.executeToolCall(tc.name, tc.input, { isSubagent: this.config.isSubagent }),
           { timeout, retries: 1 },
           this.logger
         );
-        results.push({ toolCallId: tc.id, toolName: tc.name, result });
-
-        // Extract output files from tool result
         this.outputFiles.push(...extractOutputFiles(result));
-      } catch (err) {
+        return { toolCallId: tc.id, toolName: tc.name, result };
+      })
+    );
+
+    return settled.map((outcome, i) => {
+      const tc = toolCalls[i]!;
+      if (outcome.status === "rejected") {
+        const err = outcome.reason as unknown;
         this.logger.error(
           { agent: this.config.name, toolName: tc.name, error: err },
           "Tool execution error in agent"
         );
-        results.push({
+        return {
           toolCallId: tc.id,
           toolName: tc.name,
           result: `Error executing ${tc.name}: ${err instanceof Error ? err.message : "Unknown error"}`,
-        });
+        };
       }
-    }
-
-    return results;
+      return outcome.value;
+    });
   }
 
   private addTranscript(role: TranscriptEntry["role"], content: string, toolName?: string): void {

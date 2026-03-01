@@ -644,12 +644,9 @@ export class Orchestrator {
     toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
     workingDir?: string
   ): Promise<{ results: Array<{ toolCallId: string; result: string }>; hasConfirmation: boolean; confirmationTokens: string[] }> {
-    const results: Array<{ toolCallId: string; result: string }> = [];
-    let hasConfirmation = false;
-    const confirmationTokens: string[] = [];
-
-    for (const tc of toolCalls) {
-      try {
+    // Execute all tool calls concurrently — the LLM already batched them as independent calls
+    const settled = await Promise.allSettled(
+      toolCalls.map(async (tc) => {
         // Run critique check BEFORE confirmation (block unsafe actions before prompting user)
         if (this.critiqueService) {
           const tier = this.skills.getToolPermissionTier(tc.name);
@@ -663,25 +660,23 @@ export class Orchestrator {
               skillName: this.skills.getSkillForTool(tc.name)?.name,
             });
             if (!critique.approved) {
-              results.push({
+              return {
                 toolCallId: tc.id,
                 result: `Action blocked by safety review (severity: ${critique.severity}): ${critique.explanation}${critique.suggestedAlternative ? ` Suggested alternative: ${critique.suggestedAlternative}` : ""}`,
-              });
-              continue;
+                isConfirmation: false as const,
+                token: undefined,
+              };
             }
           }
         }
 
         // Check if this tool requires confirmation
-        const requiresConfirmation =
-          this.skills.toolRequiresConfirmation(tc.name);
+        const requiresConfirmation = this.skills.toolRequiresConfirmation(tc.name);
 
         // Check sensitive tool policy
         const isSensitive = this.skills.isSensitiveTool(tc.name);
         const sensitiveNeedsConfirmation =
           isSensitive && this.sensitiveToolPolicy === "always_confirm";
-        // "confirm_with_external" is a future hook point — defaults to pass-through
-        // since email integration (the primary external content source) is removed
 
         if (requiresConfirmation || sensitiveNeedsConfirmation) {
           const description = `${tc.name}(${JSON.stringify(tc.input)})`;
@@ -693,15 +688,12 @@ export class Orchestrator {
             description,
             workingDir
           );
-
-          hasConfirmation = true;
-          confirmationTokens.push(token);
-
-          results.push({
+          return {
             toolCallId: tc.id,
             result: `This action requires confirmation. Reply with "confirm ${token}" to proceed. Action: ${description}`,
-          });
-          continue;
+            isConfirmation: true as const,
+            token,
+          };
         }
 
         // Execute with timeout and retry for transient errors
@@ -710,23 +702,35 @@ export class Orchestrator {
           { timeout: TOOL_EXECUTION_TIMEOUT_MS, retries: 1 },
           this.logger
         );
+        return { toolCallId: tc.id, result, isConfirmation: false as const, token: undefined };
+      })
+    );
 
-        results.push({ toolCallId: tc.id, result });
-      } catch (err) {
-        this.logger.error(
-          { toolName: tc.name, error: err },
-          "Tool execution error"
-        );
+    const results: Array<{ toolCallId: string; result: string }> = [];
+    let hasConfirmation = false;
+    const confirmationTokens: string[] = [];
 
-        // Classify and record the error for pattern detection
+    for (let i = 0; i < settled.length; i++) {
+      const tc = toolCalls[i]!;
+      const outcome = settled[i]!;
+
+      if (outcome.status === "rejected") {
+        const err = outcome.reason as unknown;
+        this.logger.error({ toolName: tc.name, error: err }, "Tool execution error");
         if (this.doctorService) {
           this.doctorService.recordError(err, tc.name);
         }
-
         results.push({
           toolCallId: tc.id,
           result: `Error executing ${tc.name}: ${err instanceof Error ? err.message : "Unknown error"}`,
         });
+      } else {
+        const { toolCallId, result, isConfirmation, token } = outcome.value;
+        results.push({ toolCallId, result });
+        if (isConfirmation && token) {
+          hasConfirmation = true;
+          confirmationTokens.push(token);
+        }
       }
     }
 
@@ -1000,49 +1004,44 @@ export class Orchestrator {
       .filter(Boolean)
       .join("\n\n") || "No skills are currently loaded.";
 
-    // Fetch context:always notes
-    const contextNotes = await this.getAlwaysNotes(userId);
-    const notesSection =
-      contextNotes.length > 0
-        ? `\n\nUser notes (always visible):\n${contextNotes.map((n) => `- ${n}`).join("\n")}`
-        : "";
-
-    // Fetch relevant memories for context injection
-    let memorySection = "";
-    if (userMessage) {
-      const memoryContext = await this.getMemoryContext(userMessage, userId);
-      if (memoryContext) {
-        memorySection = `\n\nRelevant memories:\n${memoryContext}`;
-      }
-    }
-
-    // Fetch relevant few-shot solution patterns
-    let fewShotSection = "";
-    if (this.fewShotService && userMessage) {
-      try {
-        const patterns = await this.fewShotService.getRelevantPatterns(userMessage);
-        if (patterns) {
-          fewShotSection = `\n\nRelevant solution patterns:\n${patterns}`;
-        }
-      } catch {
-        // Non-fatal — skip few-shot injection on error
-      }
-    }
-
     // Memory instructions (if memory tools are available)
     const hasMemoryTools = tools?.some(t => t.name.startsWith("memory_"));
     const defaultMemoryInstructions = hasMemoryTools
       ? `\n\n${PROMPT_FILES.memory}`
       : "";
 
-    // Check DB-backed prompt sections (prompt evolution — 4.3)
+    // Fetch all context and DB-backed prompt sections in one parallel batch
     const pm = this.promptManager;
-    const [identitySection, guidelinesSection, securitySection, memoryInstructionsSection] = await Promise.all([
-      pm?.getSection("identity", currentTier).catch(() => null),
-      pm?.getSection("guidelines", currentTier).catch(() => null),
-      pm?.getSection("security", currentTier).catch(() => null),
-      hasMemoryTools ? pm?.getSection("memory_instructions", currentTier).catch(() => null) : Promise.resolve(null),
+    const [
+      contextNotes,
+      memoryContext,
+      fewShotPatterns,
+      identitySection,
+      guidelinesSection,
+      securitySection,
+      memoryInstructionsSection,
+    ] = await Promise.all([
+      this.getAlwaysNotes(userId),
+      userMessage ? this.getMemoryContext(userMessage, userId) : Promise.resolve(null),
+      userMessage && this.fewShotService
+        ? this.fewShotService.getRelevantPatterns(userMessage).catch(() => null)
+        : Promise.resolve(null),
+      pm?.getSection("identity", currentTier).catch(() => null) ?? Promise.resolve(null),
+      pm?.getSection("guidelines", currentTier).catch(() => null) ?? Promise.resolve(null),
+      pm?.getSection("security", currentTier).catch(() => null) ?? Promise.resolve(null),
+      hasMemoryTools
+        ? (pm?.getSection("memory_instructions", currentTier).catch(() => null) ?? Promise.resolve(null))
+        : Promise.resolve(null),
     ]);
+
+    const notesSection =
+      contextNotes.length > 0
+        ? `\n\nUser notes (always visible):\n${contextNotes.map((n) => `- ${n}`).join("\n")}`
+        : "";
+
+    const memorySection = memoryContext ? `\n\nRelevant memories:\n${memoryContext}` : "";
+
+    const fewShotSection = fewShotPatterns ? `\n\nRelevant solution patterns:\n${fewShotPatterns}` : "";
 
     const identityText = identitySection?.content ?? PROMPT_FILES.soul;
     const guidelinesText = guidelinesSection?.content ?? PROMPT_FILES.guidelines;

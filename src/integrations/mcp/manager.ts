@@ -29,6 +29,9 @@ export class McpServerManager {
   private servers = new Map<string, ServerState>();
   private logger: Logger;
   private idleCheckIntervalId?: NodeJS.Timeout;
+  // In-flight connection promises — prevents double-connect races when two callers
+  // hit an uninitialized server simultaneously.
+  private connectPromises = new Map<string, Promise<Tool[]>>();
 
   constructor(logger: Logger) {
     this.logger = logger;
@@ -110,6 +113,9 @@ export class McpServerManager {
   /**
    * Ensure a server is connected (lazy initialization).
    * Returns the filtered tools for the server.
+   *
+   * Uses a connection promise singleton to prevent double-connect races when
+   * two callers hit an uninitialized server at the same time.
    */
   async ensureConnected(serverName: string): Promise<Tool[]> {
     const state = this.servers.get(serverName);
@@ -117,22 +123,31 @@ export class McpServerManager {
       throw new Error(`MCP server not registered: ${serverName}`);
     }
 
-    // Already connected - return cached tools
+    // Fast path: already connected with cached tools
     if (state.client.isConnected() && state.tools) {
       return state.tools;
     }
 
-    // Connect and discover tools
+    // Return the in-flight promise if a connection is already in progress
+    const inflight = this.connectPromises.get(serverName);
+    if (inflight) return inflight;
+
+    const promise = this.doConnect(serverName, state).finally(() => {
+      this.connectPromises.delete(serverName);
+    });
+    this.connectPromises.set(serverName, promise);
+    return promise;
+  }
+
+  private async doConnect(serverName: string, state: ServerState): Promise<Tool[]> {
     this.logger.info({ server: serverName }, "Connecting to MCP server (lazy init)");
 
     try {
       await state.client.connect();
 
-      // Discover and filter tools
       const allTools = await state.client.listTools();
       const filteredTools = filterMcpTools(allTools, state.config);
 
-      // Cache tools
       state.tools = filteredTools;
 
       this.logger.info(
